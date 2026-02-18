@@ -121,7 +121,7 @@ class ConversationOrchestrator:
                 lead_name=lead.name or lead.first_name,
                 lead_phone=lead.phone,
                 lead_email=lead.email,
-                channel=conversation.channel.value,
+                channel=conversation.channel,
                 message_history=message_history[:-1],  # Exclude the message we're responding to
                 current_qualification=self._build_qualification_data(lead),
                 rag_context=rag_context,
@@ -266,7 +266,7 @@ class ConversationOrchestrator:
                 lead_name=lead.name or lead.first_name,
                 lead_phone=lead.phone,
                 lead_email=lead.email,
-                channel=conversation.channel.value,
+                channel=conversation.channel,
                 message_history=[],
                 current_qualification=QualificationData(),
             )
@@ -462,7 +462,7 @@ class ConversationOrchestrator:
                     conversation.id, limit=5
                 )
                 snippet = "\n".join([
-                    f"[{m.role.value.upper()}] {m.content[:200]}" 
+                    f"[{m.role.upper()}] {m.content[:200]}" 
                     for m in messages
                 ])
                 
@@ -540,7 +540,7 @@ class ConversationOrchestrator:
                 lead_score="HOT",
                 qualification_data=qual_data,
                 conversation_summary=summary,
-                channel=conversation.channel.value,
+                channel=conversation.channel,
             )
         except Exception as e:
             logger.error("Failed to sync hot lead to CRM", error=str(e))
@@ -603,7 +603,7 @@ class ConversationOrchestrator:
                 await self.lead_service.schedule_appointment(
                     lead_id=lead.id,
                     appointment_time=appointment_time,
-                    notes=f"Cal.com Booking: {booking.get('uid')}",
+                    appointment_type=f"Cal.com Booking: {booking.get('uid')}",
                 )
                 
                 # Send confirmation email to lead
@@ -640,13 +640,15 @@ class ConversationOrchestrator:
 
         logger.info(
             "Sending message to channel",
-            channel=channel.value,
+            channel=channel.value if isinstance(channel, ChannelType) else channel,
             recipient=recipient,
             message_preview=message[:100],
         )
 
         try:
-            if channel == ChannelType.SMS and settings.enable_sms:
+            channel_str = channel.value if isinstance(channel, ChannelType) else channel
+            
+            if channel_str == ChannelType.SMS.value and settings.enable_sms:
                 # Get client's Twilio number if configured
                 client_config = await self.client_service.get_client_config(client.id)
                 from_number = client_config.get("twilio_phone_number")
@@ -657,7 +659,7 @@ class ConversationOrchestrator:
                     from_number=from_number,
                 )
                 
-            elif channel == ChannelType.WHATSAPP and settings.enable_whatsapp:
+            elif channel_str == ChannelType.WHATSAPP.value and settings.enable_whatsapp:
                 client_config = await self.client_service.get_client_config(client.id)
                 from_number = client_config.get("twilio_whatsapp_number")
                 
@@ -667,12 +669,12 @@ class ConversationOrchestrator:
                     from_number=from_number,
                 )
                 
-            elif channel in [ChannelType.WEB_FORM, ChannelType.LIVE_CHAT]:
+            elif channel_str in [ChannelType.WEB_FORM.value, ChannelType.LIVE_CHAT.value]:
                 # Web channels are handled via the API response directly
                 # No push notification needed - client polls or uses websocket
                 logger.debug("Web channel - no push delivery needed")
                 
-            elif channel == ChannelType.EMAIL:
+            elif channel_str == ChannelType.EMAIL.value:
                 # Send email response
                 await self.email_service.send_email(
                     to=recipient,
@@ -681,12 +683,12 @@ class ConversationOrchestrator:
                 )
                 
             else:
-                logger.warning("Unsupported channel for delivery", channel=channel.value)
+                logger.warning("Unsupported channel for delivery", channel=channel_str)
                 
         except Exception as e:
             logger.error(
                 "Failed to send message to channel",
-                channel=channel.value,
+                channel=channel_str,
                 recipient=recipient,
                 error=str(e),
             )

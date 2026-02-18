@@ -1,6 +1,6 @@
-// Dashboard Overview Page
+// Dashboard Overview Page - Connected to Backend API
 
-import { useEffect } from 'react';
+
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -31,7 +31,7 @@ import {
 import { format, parseISO } from 'date-fns';
 import { clsx } from 'clsx';
 import { useClientStore } from '../store';
-import { dashboardApi, leadsApi, conversationsApi } from '../api';
+import { dashboardApi, leadsApi } from '../api';
 import type { DashboardStats, Lead, LeadsByDay, LeadsByChannel } from '../types';
 
 const COLORS = {
@@ -41,43 +41,30 @@ const COLORS = {
   other: '#6b7280',
 };
 
-const CHANNEL_COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#6366f1'];
 
-// Mock data for demo (replace with real API calls)
-const mockStats: DashboardStats = {
-  total_leads: 156,
-  leads_today: 12,
-  hot_leads: 8,
-  warm_leads: 45,
-  cold_leads: 103,
-  appointments_booked: 23,
-  active_conversations: 7,
-  escalations_pending: 3,
-  avg_response_time_ms: 2400,
-  qualification_rate: 67.5,
-  tokens_used: 450000,
-  tokens_budget: 1000000,
-};
+// Loading Skeleton
+function StatCardSkeleton() {
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 animate-pulse">
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <div className="h-4 w-24 bg-gray-200 rounded" />
+          <div className="h-8 w-16 bg-gray-200 rounded" />
+        </div>
+        <div className="h-12 w-12 bg-gray-200 rounded-lg" />
+      </div>
+    </div>
+  );
+}
 
-const mockLeadsByDay: LeadsByDay[] = Array.from({ length: 14 }, (_, i) => {
-  const date = new Date();
-  date.setDate(date.getDate() - (13 - i));
-  return {
-    date: format(date, 'yyyy-MM-dd'),
-    total: Math.floor(Math.random() * 20) + 5,
-    hot: Math.floor(Math.random() * 5),
-    warm: Math.floor(Math.random() * 8) + 2,
-    cold: Math.floor(Math.random() * 10) + 3,
-  };
-});
-
-const mockLeadsByChannel: LeadsByChannel[] = [
-  { channel: 'web_form', count: 45, percentage: 28.8 },
-  { channel: 'whatsapp', count: 38, percentage: 24.4 },
-  { channel: 'sms', count: 32, percentage: 20.5 },
-  { channel: 'missed_call', count: 25, percentage: 16.0 },
-  { channel: 'live_chat', count: 16, percentage: 10.3 },
-];
+function ChartSkeleton() {
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 animate-pulse">
+      <div className="h-6 w-32 bg-gray-200 rounded mb-4" />
+      <div className="h-64 bg-gray-100 rounded" />
+    </div>
+  );
+}
 
 interface StatCardProps {
   title: string;
@@ -237,7 +224,29 @@ function ChannelChart({ data }: { data: LeadsByChannel[] }) {
   );
 }
 
-function RecentLeads({ leads }: { leads: Lead[] }) {
+function RecentLeads({ leads, isLoading }: { leads: Lead[]; isLoading: boolean }) {
+  if (isLoading) {
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 animate-pulse">
+        <div className="h-6 w-32 bg-gray-200 rounded mb-4" />
+        <div className="space-y-4">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="flex items-center justify-between py-2">
+              <div className="flex items-center space-x-3">
+                <div className="h-2 w-2 bg-gray-200 rounded-full" />
+                <div className="space-y-1">
+                  <div className="h-4 w-32 bg-gray-200 rounded" />
+                  <div className="h-3 w-24 bg-gray-200 rounded" />
+                </div>
+              </div>
+              <div className="h-6 w-16 bg-gray-200 rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
       <div className="flex items-center justify-between mb-4">
@@ -248,7 +257,11 @@ function RecentLeads({ leads }: { leads: Lead[] }) {
       </div>
       <div className="space-y-4">
         {leads.slice(0, 5).map((lead) => (
-          <div key={lead.id} className="flex items-center justify-between py-2 border-b last:border-0">
+          <Link 
+            key={lead.id} 
+            to={`/leads/${lead.id}`}
+            className="flex items-center justify-between py-2 border-b last:border-0 hover:bg-gray-50 -mx-2 px-2 rounded"
+          >
             <div className="flex items-center">
               <div
                 className={clsx(
@@ -279,7 +292,7 @@ function RecentLeads({ leads }: { leads: Lead[] }) {
                 {lead.score}
               </span>
             </div>
-          </div>
+          </Link>
         ))}
         {leads.length === 0 && (
           <p className="text-gray-500 text-center py-4">No leads yet</p>
@@ -321,39 +334,88 @@ function TokenUsage({ used, budget }: { used: number; budget: number }) {
   );
 }
 
+function ErrorMessage({ message }: { message: string }) {
+  return (
+    <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+      <ExclamationTriangleIcon className="h-8 w-8 text-red-500 mx-auto mb-2" />
+      <p className="text-red-700">{message}</p>
+      <button
+        onClick={() => window.location.reload()}
+        className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const { currentClient } = useClientStore();
-  
-  // In production, replace mock data with real API calls
-  const stats = mockStats;
-  const leadsByDay = mockLeadsByDay;
-  const leadsByChannel = mockLeadsByChannel;
-  
-  // Mock recent leads
-  const recentLeads: Lead[] = [
-    {
-      id: '1',
-      client_id: '1',
-      name: 'Ahmed Al-Rashid',
-      email: 'ahmed@example.com',
-      phone: '+966501234567',
-      status: 'qualifying',
-      score: 'hot',
-      service_interest: 'Home Purchase',
-      created_at: new Date().toISOString(),
-    } as Lead,
-    {
-      id: '2',
-      client_id: '1',
-      name: 'Sarah Johnson',
-      email: 'sarah@example.com',
-      phone: '+14155551234',
-      status: 'new',
-      score: 'warm',
-      service_interest: 'Rental Property',
-      created_at: new Date(Date.now() - 3600000).toISOString(),
-    } as Lead,
-  ];
+  const clientId = currentClient?.id;
+
+  // Fetch dashboard stats
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    error: statsError,
+  } = useQuery({
+    queryKey: ['dashboard-stats', clientId],
+    queryFn: () => dashboardApi.getStats(clientId!),
+    enabled: !!clientId,
+    staleTime: 30000, // 30 seconds
+    refetchInterval: 60000, // Refresh every minute
+  });
+
+  // Fetch leads by day
+  const {
+    data: leadsByDay,
+    isLoading: leadsByDayLoading,
+  } = useQuery({
+    queryKey: ['leads-by-day', clientId],
+    queryFn: () => dashboardApi.getLeadsByDay(clientId!, 14),
+    enabled: !!clientId,
+    staleTime: 60000,
+  });
+
+  // Fetch leads by channel
+  const {
+    data: leadsByChannel,
+    isLoading: leadsByChannelLoading,
+  } = useQuery({
+    queryKey: ['leads-by-channel', clientId],
+    queryFn: () => dashboardApi.getLeadsByChannel(clientId!),
+    enabled: !!clientId,
+    staleTime: 60000,
+  });
+
+  // Fetch recent leads
+  const {
+    data: recentLeadsData,
+    isLoading: recentLeadsLoading,
+  } = useQuery({
+    queryKey: ['recent-leads', clientId],
+    queryFn: () => leadsApi.list(clientId!, {}, 1, 5),
+    enabled: !!clientId,
+    staleTime: 30000,
+  });
+
+  const recentLeads = recentLeadsData?.items || [];
+
+  // No client selected
+  if (!clientId) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <p className="text-gray-500">Please select a client to view the dashboard</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (statsError) {
+    return <ErrorMessage message="Failed to load dashboard data" />;
+  }
 
   return (
     <div className="space-y-6">
@@ -367,80 +429,126 @@ export default function DashboardPage() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="Total Leads"
-          value={stats.total_leads}
-          icon={UserGroupIcon}
-          trend={{ value: 12, isPositive: true }}
-          color="blue"
-          href="/leads"
-        />
-        <StatCard
-          title="Hot Leads"
-          value={stats.hot_leads}
-          icon={FireIcon}
-          trend={{ value: 8, isPositive: true }}
-          color="red"
-          href="/leads?score=hot"
-        />
-        <StatCard
-          title="Appointments"
-          value={stats.appointments_booked}
-          icon={CalendarIcon}
-          trend={{ value: 15, isPositive: true }}
-          color="green"
-        />
-        <StatCard
-          title="Escalations"
-          value={stats.escalations_pending}
-          icon={ExclamationTriangleIcon}
-          color="yellow"
-          href="/escalations"
-        />
+        {statsLoading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : stats ? (
+          <>
+            <StatCard
+              title="Total Leads"
+              value={stats.total_leads}
+              icon={UserGroupIcon}
+              color="blue"
+              href="/leads"
+            />
+            <StatCard
+              title="Hot Leads"
+              value={stats.hot_leads}
+              icon={FireIcon}
+              color="red"
+              href="/leads?score=hot"
+            />
+            <StatCard
+              title="Appointments"
+              value={stats.appointments_booked}
+              icon={CalendarIcon}
+              color="green"
+            />
+            <StatCard
+              title="Escalations"
+              value={stats.escalations_pending}
+              icon={ExclamationTriangleIcon}
+              color="yellow"
+              href="/escalations"
+            />
+          </>
+        ) : null}
       </div>
 
       {/* Second Row */}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="Active Conversations"
-          value={stats.active_conversations}
-          icon={ChatBubbleLeftRightIcon}
-          color="purple"
-          href="/conversations?active=true"
-        />
-        <StatCard
-          title="Avg Response Time"
-          value={`${(stats.avg_response_time_ms / 1000).toFixed(1)}s`}
-          icon={ClockIcon}
-          trend={{ value: 5, isPositive: true }}
-          color="blue"
-        />
-        <StatCard
-          title="Qualification Rate"
-          value={`${stats.qualification_rate}%`}
-          icon={ArrowTrendingUpIcon}
-          trend={{ value: 3, isPositive: true }}
-          color="green"
-        />
-        <StatCard
-          title="Today's Leads"
-          value={stats.leads_today}
-          icon={UserGroupIcon}
-          color="blue"
-        />
+        {statsLoading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : stats ? (
+          <>
+            <StatCard
+              title="Active Conversations"
+              value={stats.active_conversations}
+              icon={ChatBubbleLeftRightIcon}
+              color="purple"
+              href="/conversations?active=true"
+            />
+            <StatCard
+              title="Avg Response Time"
+              value={`${(stats.avg_response_time_ms / 1000).toFixed(1)}s`}
+              icon={ClockIcon}
+              color="blue"
+            />
+            <StatCard
+              title="Qualification Rate"
+              value={`${stats.qualification_rate}%`}
+              icon={ArrowTrendingUpIcon}
+              color="green"
+            />
+            <StatCard
+              title="Today's Leads"
+              value={stats.leads_today}
+              icon={UserGroupIcon}
+              color="blue"
+            />
+          </>
+        ) : null}
       </div>
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <LeadsChart data={leadsByDay} />
-        <LeadsByScoreChart stats={stats} />
+        {leadsByDayLoading ? (
+          <ChartSkeleton />
+        ) : leadsByDay && leadsByDay.length > 0 ? (
+          <LeadsChart data={leadsByDay} />
+        ) : (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Leads Over Time</h3>
+            <p className="text-gray-500 text-center py-20">No data available</p>
+          </div>
+        )}
+        
+        {statsLoading ? (
+          <ChartSkeleton />
+        ) : stats ? (
+          <LeadsByScoreChart stats={stats} />
+        ) : null}
       </div>
 
       {/* Bottom Row */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <ChannelChart data={leadsByChannel} />
-        <RecentLeads leads={recentLeads} />
-        <TokenUsage used={stats.tokens_used} budget={stats.tokens_budget} />
+        {leadsByChannelLoading ? (
+          <ChartSkeleton />
+        ) : leadsByChannel && leadsByChannel.length > 0 ? (
+          <ChannelChart data={leadsByChannel} />
+        ) : (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Leads by Channel</h3>
+            <p className="text-gray-500 text-center py-20">No data available</p>
+          </div>
+        )}
+        
+        <RecentLeads leads={recentLeads} isLoading={recentLeadsLoading} />
+        
+        {stats ? (
+          <TokenUsage used={stats.tokens_used} budget={stats.tokens_budget} />
+        ) : (
+          <ChartSkeleton />
+        )}
       </div>
     </div>
   );

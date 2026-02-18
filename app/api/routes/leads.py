@@ -54,7 +54,6 @@ class LeadUpdate(BaseModel):
     preferred_contact_time: str | None = None
     status: LeadStatus | None = None
     score: LeadScore | None = None
-    tags: list[str] | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -94,22 +93,21 @@ class LeadResponse(BaseModel):
     name: str | None
     first_name: str | None
     last_name: str | None
-    source_channel: ChannelType
+    source_channel: str
     source_campaign: str | None
-    status: LeadStatus
-    score: LeadScore
+    status: str
+    score: str
     score_value: int
     service_interest: str | None
     urgency: str | None
     budget_range: str | None
     location: str | None
     preferred_contact_time: str | None
-    appointment_scheduled: datetime | None
-    assigned_to: str | None
+    appointment_at: datetime | None
+    handed_off_to: str | None
     handed_off_at: datetime | None
     qualification_data: dict[str, Any]
-    tags: list[str] | None
-    metadata: dict[str, Any]
+    lead_metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime
 

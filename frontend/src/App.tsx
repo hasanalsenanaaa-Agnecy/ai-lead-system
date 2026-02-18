@@ -9,6 +9,9 @@ import DashboardLayout from './layouts/DashboardLayout';
 
 // Pages
 import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import DashboardPage from './pages/DashboardPage';
 import LeadsPage from './pages/LeadsPage';
 import ConversationsPage from './pages/ConversationsPage';
@@ -18,8 +21,11 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import ClientsPage from './pages/ClientsPage';
 import SettingsPage from './pages/SettingsPage';
 
-// Store
-import { useAuthStore } from './store';
+// Components
+import ProtectedRoute, { GuestRoute } from './components/ProtectedRoute';
+
+// Hooks
+import { useAuth } from './hooks/useAuth';
 
 // React Query client
 const queryClient = new QueryClient({
@@ -27,69 +33,102 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 1000 * 60 * 5, // 5 minutes
       retry: 1,
+      refetchOnWindowFocus: false,
     },
   },
 });
 
-// Protected route wrapper
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuthStore();
-  
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-  
-  return <>{children}</>;
-}
-
-// Public route wrapper (redirects to dashboard if already logged in)
-function PublicRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuthStore();
-  
-  if (isAuthenticated) {
-    return <Navigate to="/" replace />;
-  }
-  
+// Auth initializer component
+function AuthInitializer({ children }: { children: React.ReactNode }) {
+  // This hook initializes auth state on app load
+  useAuth();
   return <>{children}</>;
 }
 
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-        <Routes>
-          {/* Public routes */}
-          <Route
-            path="/login"
-            element={
-              <PublicRoute>
-                <LoginPage />
-              </PublicRoute>
-            }
-          />
+      <BrowserRouter>
+        <AuthInitializer>
+          <Routes>
+            {/* Public routes (guest only) */}
+            <Route
+              path="/login"
+              element={
+                <GuestRoute>
+                  <LoginPage />
+                </GuestRoute>
+              }
+            />
+            <Route
+              path="/register"
+              element={
+                <GuestRoute>
+                  <RegisterPage />
+                </GuestRoute>
+              }
+            />
+            <Route
+              path="/forgot-password"
+              element={
+                <GuestRoute>
+                  <ForgotPasswordPage />
+                </GuestRoute>
+              }
+            />
+            <Route
+              path="/reset-password"
+              element={
+                <GuestRoute>
+                  <ResetPasswordPage />
+                </GuestRoute>
+              }
+            />
 
-          {/* Protected routes with dashboard layout */}
-          <Route
-            element={
-              <ProtectedRoute>
-                <DashboardLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/leads" element={<LeadsPage />} />
-            <Route path="/leads/:id" element={<LeadsPage />} />
-            <Route path="/conversations" element={<ConversationsPage />} />
-            <Route path="/escalations" element={<EscalationsPage />} />
-            <Route path="/knowledge" element={<KnowledgePage />} />
-            <Route path="/analytics" element={<AnalyticsPage />} />
-            <Route path="/clients" element={<ClientsPage />} />
-            <Route path="/clients/:id" element={<ClientsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Route>
+            {/* Protected routes with dashboard layout */}
+            <Route
+              element={
+                <ProtectedRoute>
+                  <DashboardLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/leads" element={<LeadsPage />} />
+              <Route path="/leads/:id" element={<LeadsPage />} />
+              <Route path="/conversations" element={<ConversationsPage />} />
+              <Route path="/conversations/:id" element={<ConversationsPage />} />
+              <Route path="/escalations" element={<EscalationsPage />} />
+              <Route path="/knowledge" element={<KnowledgePage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
+              
+              {/* Admin only routes */}
+              <Route
+                path="/clients"
+                element={
+                  <ProtectedRoute requiredRoles={['super_admin', 'admin']}>
+                    <ClientsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/clients/:id"
+                element={
+                  <ProtectedRoute requiredRoles={['super_admin', 'admin']}>
+                    <ClientsPage />
+                  </ProtectedRoute>
+                }
+              />
+              
+              <Route path="/settings" element={<SettingsPage />} />
+            </Route>
 
-          {/* Catch all - redirect to dashboard */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            {/* Catch all - redirect to dashboard */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </AuthInitializer>
+      </BrowserRouter>
+
       {/* Toast notifications */}
       <Toaster
         position="top-right"

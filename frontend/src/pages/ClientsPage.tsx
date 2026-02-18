@@ -1,447 +1,391 @@
-// Clients Management Page (Admin)
+// Clients Page - Admin: Manage client/tenant accounts
 
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { format, parseISO } from 'date-fns';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { format } from 'date-fns';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
 import {
-  PlusIcon,
-  MagnifyingGlassIcon,
   BuildingOfficeIcon,
+  PlusIcon,
+  PencilSquareIcon,
   PlayIcon,
   PauseIcon,
-  TrashIcon,
-  PencilIcon,
-  EyeIcon,
+  ClipboardDocumentIcon,
+  MagnifyingGlassIcon,
+  XMarkIcon,
+
+  ChartBarIcon,
 } from '@heroicons/react/24/outline';
-import type { Client, ClientStatus } from '../types';
+import { useClientStore } from '../store';
+import { clientsApi } from '../api';
+import type { Client, CreateClientRequest } from '../types';
 
-// Mock data
-const mockClients: Client[] = [
-  {
-    id: '1',
-    name: 'Al-Rashid Real Estate',
-    slug: 'al-rashid',
-    industry: 'Real Estate',
-    status: 'active',
-    timezone: 'Asia/Riyadh',
-    primary_language: 'ar',
-    notification_email: 'owner@alrashid.sa',
-    tokens_used_this_month: 450000,
-    monthly_token_budget: 1000000,
-    created_at: new Date(Date.now() - 86400000 * 30).toISOString(),
-    updated_at: new Date().toISOString(),
-  } as Client,
-  {
-    id: '2',
-    name: 'Premium Motors',
-    slug: 'premium-motors',
-    industry: 'Automotive',
-    status: 'active',
-    timezone: 'Asia/Riyadh',
-    primary_language: 'en',
-    notification_email: 'sales@premium.sa',
-    tokens_used_this_month: 280000,
-    monthly_token_budget: 500000,
-    created_at: new Date(Date.now() - 86400000 * 15).toISOString(),
-    updated_at: new Date().toISOString(),
-  } as Client,
-  {
-    id: '3',
-    name: 'Gulf Legal Services',
-    slug: 'gulf-legal',
-    industry: 'Legal',
-    status: 'paused',
-    timezone: 'Asia/Dubai',
-    primary_language: 'en',
-    notification_email: 'info@gulflegal.ae',
-    tokens_used_this_month: 0,
-    monthly_token_budget: 250000,
-    created_at: new Date(Date.now() - 86400000 * 45).toISOString(),
-    updated_at: new Date(Date.now() - 86400000 * 5).toISOString(),
-  } as Client,
-  {
-    id: '4',
-    name: 'Wellness Clinic',
-    slug: 'wellness-clinic',
-    industry: 'Healthcare',
-    status: 'onboarding',
-    timezone: 'Asia/Riyadh',
-    primary_language: 'ar',
-    notification_email: 'admin@wellness.sa',
-    tokens_used_this_month: 5000,
-    monthly_token_budget: 300000,
-    created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
-    updated_at: new Date().toISOString(),
-  } as Client,
-];
-
-const STATUS_COLORS: Record<ClientStatus, { bg: string; text: string; dot: string }> = {
-  active: { bg: 'bg-green-100', text: 'text-green-700', dot: 'bg-green-500' },
-  paused: { bg: 'bg-yellow-100', text: 'text-yellow-700', dot: 'bg-yellow-500' },
-  onboarding: { bg: 'bg-blue-100', text: 'text-blue-700', dot: 'bg-blue-500' },
-  churned: { bg: 'bg-red-100', text: 'text-red-700', dot: 'bg-red-500' },
-};
-
-interface CreateClientModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onCreate: (data: { name: string; slug: string; industry: string; email: string }) => void;
-}
-
-function CreateClientModal({ isOpen, onClose, onCreate }: CreateClientModalProps) {
-  const [formData, setFormData] = useState({
-    name: '',
-    slug: '',
-    industry: 'real_estate',
-    email: '',
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (formData.name && formData.slug && formData.email) {
-      onCreate(formData);
-      setFormData({ name: '', slug: '', industry: 'real_estate', email: '' });
-      onClose();
-    }
-  };
-
-  const generateSlug = (name: string) => {
-    return name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
-  };
-
-  if (!isOpen) return null;
-
+function ClientSkeleton() {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
-        <div className="p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Add New Client</h2>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Business Name
-              </label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => {
-                  setFormData({
-                    ...formData,
-                    name: e.target.value,
-                    slug: generateSlug(e.target.value),
-                  });
-                }}
-                placeholder="e.g., Acme Real Estate"
-                className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                required
-              />
+    <div className="animate-pulse space-y-3">
+      {[...Array(3)].map((_, i) => (
+        <div key={i} className="bg-white rounded-lg border border-gray-200 p-5">
+          <div className="flex items-center justify-between">
+            <div className="space-y-2">
+              <div className="h-5 w-40 bg-gray-200 rounded" />
+              <div className="h-4 w-24 bg-gray-200 rounded" />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Slug (URL identifier)
-              </label>
-              <input
-                type="text"
-                value={formData.slug}
-                onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
-                placeholder="e.g., acme-real-estate"
-                className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono text-sm"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Industry
-              </label>
-              <select
-                value={formData.industry}
-                onChange={(e) => setFormData({ ...formData, industry: e.target.value })}
-                className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="real_estate">Real Estate</option>
-                <option value="automotive">Automotive</option>
-                <option value="healthcare">Healthcare</option>
-                <option value="legal">Legal Services</option>
-                <option value="finance">Financial Services</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Contact Email
-              </label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                placeholder="owner@example.com"
-                className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                required
-              />
-            </div>
-            <div className="flex justify-end gap-3 pt-4">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Create Client
-              </button>
-            </div>
-          </form>
+            <div className="h-8 w-20 bg-gray-200 rounded-full" />
+          </div>
         </div>
-      </div>
+      ))}
     </div>
   );
 }
 
 export default function ClientsPage() {
-  const [clients, setClients] = useState(mockClients);
+  const { setCurrentClient } = useClientStore();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<ClientStatus | ''>('');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [newApiKey, setNewApiKey] = useState<{ clientId: string; key: string } | null>(null);
 
-  const filteredClients = clients.filter((client) => {
-    if (search) {
-      const searchLower = search.toLowerCase();
-      if (
-        !client.name.toLowerCase().includes(searchLower) &&
-        !client.slug.toLowerCase().includes(searchLower)
-      ) {
-        return false;
-      }
-    }
-    if (statusFilter && client.status !== statusFilter) return false;
-    return true;
+  // Create form
+  const [createForm, setCreateForm] = useState<CreateClientRequest>({
+    name: '',
+    slug: '',
+    industry: '',
+    timezone: 'America/New_York',
+    primary_language: 'en',
   });
 
-  const handleCreateClient = (data: { name: string; slug: string; industry: string; email: string }) => {
-    const newClient: Client = {
-      id: crypto.randomUUID(),
-      name: data.name,
-      slug: data.slug,
-      industry: data.industry,
-      status: 'onboarding',
-      timezone: 'Asia/Riyadh',
-      primary_language: 'en',
-      notification_email: data.email,
-      tokens_used_this_month: 0,
-      monthly_token_budget: 500000,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      config: {},
-    };
-    setClients([newClient, ...clients]);
-    toast.success(`Client "${data.name}" created. API key has been generated.`);
+  const { data: clients, isLoading } = useQuery({
+    queryKey: ['clients-admin'],
+    queryFn: () => clientsApi.list(),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data: CreateClientRequest) => clientsApi.create(data),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['clients-admin'] });
+      toast.success('Client created successfully');
+      setNewApiKey({ clientId: data.id, key: data.api_key });
+      setShowCreateModal(false);
+      setCreateForm({ name: '', slug: '', industry: '', timezone: 'America/New_York', primary_language: 'en' });
+    },
+    onError: () => toast.error('Failed to create client'),
+  });
+
+  const activateMutation = useMutation({
+    mutationFn: (id: string) => clientsApi.activate(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['clients-admin'] });
+      toast.success('Client activated');
+    },
+    onError: () => toast.error('Failed to activate client'),
+  });
+
+  const pauseMutation = useMutation({
+    mutationFn: (id: string) => clientsApi.pause(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['clients-admin'] });
+      toast.success('Client paused');
+    },
+    onError: () => toast.error('Failed to pause client'),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<Client> }) => clientsApi.update(id, data as any),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['clients-admin'] });
+      toast.success('Client updated');
+      setEditingClient(null);
+    },
+    onError: () => toast.error('Failed to update client'),
+  });
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success('Copied to clipboard');
   };
 
-  const toggleClientStatus = (client: Client) => {
-    const newStatus: ClientStatus = client.status === 'active' ? 'paused' : 'active';
-    setClients(
-      clients.map((c) => (c.id === client.id ? { ...c, status: newStatus } : c))
+  const filteredClients = (clients || []).filter((c: Client) => {
+    if (!search) return true;
+    return (
+      c.name.toLowerCase().includes(search.toLowerCase()) ||
+      c.slug.toLowerCase().includes(search.toLowerCase()) ||
+      c.industry?.toLowerCase().includes(search.toLowerCase())
     );
-    toast.success(`Client ${newStatus === 'active' ? 'activated' : 'paused'}`);
-  };
+  });
 
-  const deleteClient = (client: Client) => {
-    if (confirm(`Are you sure you want to delete "${client.name}"? This action cannot be undone.`)) {
-      setClients(clients.filter((c) => c.id !== client.id));
-      toast.success('Client deleted');
-    }
+  const statusCounts = {
+    active: (clients || []).filter((c: Client) => c.status === 'active').length,
+    paused: (clients || []).filter((c: Client) => c.status === 'paused').length,
+    onboarding: (clients || []).filter((c: Client) => c.status === 'onboarding').length,
+    total: (clients || []).length,
   };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Clients</h1>
-          <p className="text-gray-500">{clients.length} total clients</p>
+          <p className="text-sm text-gray-500 mt-1">
+            Manage client accounts · {statusCounts.active} active · {statusCounts.total} total
+          </p>
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
         >
-          <PlusIcon className="h-4 w-4" />
-          Add Client
+          <PlusIcon className="h-4 w-4 mr-2" />
+          New Client
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="flex-1">
-          <div className="relative">
-            <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search clients..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-4 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-        </div>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as ClientStatus | '')}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="">All Statuses</option>
-          <option value="active">Active</option>
-          <option value="paused">Paused</option>
-          <option value="onboarding">Onboarding</option>
-          <option value="churned">Churned</option>
-        </select>
-      </div>
-
-      {/* Clients Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredClients.map((client) => {
-          const usagePercent = Math.round(
-            (client.tokens_used_this_month / client.monthly_token_budget) * 100
-          );
-          const statusColor = STATUS_COLORS[client.status];
-
-          return (
-            <div
-              key={client.id}
-              className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-12 w-12 rounded-lg bg-gray-100 flex items-center justify-center">
-                    <BuildingOfficeIcon className="h-6 w-6 text-gray-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900">{client.name}</h3>
-                    <p className="text-sm text-gray-500">{client.industry}</p>
-                  </div>
-                </div>
-                <span
-                  className={clsx(
-                    'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium',
-                    statusColor.bg,
-                    statusColor.text
-                  )}
-                >
-                  <span className={clsx('h-1.5 w-1.5 rounded-full', statusColor.dot)} />
-                  {client.status}
-                </span>
-              </div>
-
-              <div className="space-y-3 mb-4">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Token Usage</span>
-                  <span className="font-medium">
-                    {(client.tokens_used_this_month / 1000).toFixed(0)}K /{' '}
-                    {(client.monthly_token_budget / 1000).toFixed(0)}K
-                  </span>
-                </div>
-                <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                  <div
-                    className={clsx(
-                      'h-full rounded-full transition-all',
-                      usagePercent >= 90
-                        ? 'bg-red-500'
-                        : usagePercent >= 70
-                        ? 'bg-yellow-500'
-                        : 'bg-blue-500'
-                    )}
-                    style={{ width: `${Math.min(usagePercent, 100)}%` }}
-                  />
-                </div>
-
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Slug</span>
-                  <span className="font-mono text-gray-700">{client.slug}</span>
-                </div>
-
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Created</span>
-                  <span className="text-gray-700">
-                    {format(parseISO(client.created_at), 'MMM d, yyyy')}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 pt-4 border-t">
-                <Link
-                  to={`/clients/${client.id}`}
-                  className="flex-1 inline-flex items-center justify-center gap-1 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg"
-                >
-                  <EyeIcon className="h-4 w-4" />
-                  View
-                </Link>
-                <button
-                  onClick={() => toggleClientStatus(client)}
-                  className={clsx(
-                    'flex-1 inline-flex items-center justify-center gap-1 py-2 text-sm font-medium rounded-lg',
-                    client.status === 'active'
-                      ? 'text-yellow-600 hover:bg-yellow-50'
-                      : 'text-green-600 hover:bg-green-50'
-                  )}
-                >
-                  {client.status === 'active' ? (
-                    <>
-                      <PauseIcon className="h-4 w-4" />
-                      Pause
-                    </>
-                  ) : (
-                    <>
-                      <PlayIcon className="h-4 w-4" />
-                      Activate
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={() => deleteClient(client)}
-                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
-                >
-                  <TrashIcon className="h-4 w-4" />
+      {/* New API Key Banner */}
+      {newApiKey && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <h4 className="text-sm font-semibold text-green-800">New Client API Key</h4>
+              <p className="text-xs text-green-600 mt-1">Save this key now — it won't be shown again.</p>
+              <div className="flex items-center gap-2 mt-2">
+                <code className="text-sm bg-green-100 px-3 py-1.5 rounded text-green-800 break-all">{newApiKey.key}</code>
+                <button onClick={() => copyToClipboard(newApiKey.key)} className="p-1.5 text-green-600 hover:text-green-800">
+                  <ClipboardDocumentIcon className="h-5 w-5" />
                 </button>
               </div>
             </div>
-          );
-        })}
-
-        {filteredClients.length === 0 && (
-          <div className="col-span-full text-center py-12 bg-white rounded-xl border border-dashed border-gray-300">
-            <BuildingOfficeIcon className="h-12 w-12 mx-auto text-gray-300 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No clients found</h3>
-            <p className="text-gray-500 mb-4">
-              {search || statusFilter
-                ? 'Try adjusting your filters'
-                : 'Add your first client to get started'}
-            </p>
-            {!search && !statusFilter && (
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                <PlusIcon className="h-4 w-4" />
-                Add Client
-              </button>
-            )}
+            <button onClick={() => setNewApiKey(null)} className="text-green-400 hover:text-green-600">
+              <XMarkIcon className="h-5 w-5" />
+            </button>
           </div>
-        )}
+        </div>
+      )}
+
+      {/* Search */}
+      <div className="relative">
+        <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+        <input
+          type="text"
+          placeholder="Search clients..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+        />
       </div>
 
-      <CreateClientModal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        onCreate={handleCreateClient}
-      />
+      {/* Client List */}
+      {isLoading ? (
+        <ClientSkeleton />
+      ) : filteredClients.length === 0 ? (
+        <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
+          <BuildingOfficeIcon className="mx-auto h-12 w-12 text-gray-300" />
+          <p className="mt-3 text-sm font-medium text-gray-900">
+            {search ? 'No clients match your search' : 'No clients yet'}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filteredClients.map((client: Client) => (
+            <div key={client.id} className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-sm transition-shadow">
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-3 mb-1">
+                    <h3 className="text-base font-semibold text-gray-900">{client.name}</h3>
+                    <span className={clsx(
+                      'inline-flex px-2 py-0.5 rounded-full text-xs font-medium',
+                      client.status === 'active' && 'bg-green-100 text-green-800',
+                      client.status === 'paused' && 'bg-yellow-100 text-yellow-800',
+                      client.status === 'onboarding' && 'bg-blue-100 text-blue-800',
+                      client.status === 'churned' && 'bg-red-100 text-red-800',
+                    )}>
+                      {client.status}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
+                    <span>Slug: <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{client.slug}</code></span>
+                    {client.industry && <span>Industry: {client.industry}</span>}
+                    <span>{client.timezone}</span>
+                    <span>Joined {format(new Date(client.created_at), 'MMM d, yyyy')}</span>
+                  </div>
+                  <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
+                    <span className="flex items-center gap-1">
+                      <ChartBarIcon className="h-3.5 w-3.5" />
+                      {client.tokens_used_this_month?.toLocaleString() || 0} / {client.monthly_token_budget?.toLocaleString() || '∞'} tokens
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 ml-4">
+                  <button
+                    onClick={() => setCurrentClient(client)}
+                    className="px-3 py-1.5 text-xs font-medium text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
+                    title="Switch to this client"
+                  >
+                    Switch
+                  </button>
+                  <button
+                    onClick={() => setEditingClient(client)}
+                    className="p-1.5 text-gray-400 hover:text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    title="Edit"
+                  >
+                    <PencilSquareIcon className="h-4 w-4" />
+                  </button>
+                  {client.status === 'active' ? (
+                    <button
+                      onClick={() => pauseMutation.mutate(client.id)}
+                      className="p-1.5 text-yellow-500 hover:text-yellow-700 border border-yellow-200 rounded-lg hover:bg-yellow-50 transition-colors"
+                      title="Pause"
+                    >
+                      <PauseIcon className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => activateMutation.mutate(client.id)}
+                      className="p-1.5 text-green-500 hover:text-green-700 border border-green-200 rounded-lg hover:bg-green-50 transition-colors"
+                      title="Activate"
+                    >
+                      <PlayIcon className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Create Client Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen px-4">
+            <div className="fixed inset-0 bg-black/50" onClick={() => setShowCreateModal(false)} />
+            <div className="relative bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">New Client</h3>
+                <button onClick={() => setShowCreateModal(false)} className="text-gray-400 hover:text-gray-600">
+                  <XMarkIcon className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Business Name *</label>
+                  <input
+                    type="text"
+                    value={createForm.name}
+                    onChange={(e) => setCreateForm({ ...createForm, name: e.target.value, slug: e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '') })}
+                    placeholder="Acme Corp"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Slug *</label>
+                  <input
+                    type="text"
+                    value={createForm.slug}
+                    onChange={(e) => setCreateForm({ ...createForm, slug: e.target.value })}
+                    placeholder="acme-corp"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">URL-friendly identifier. Lowercase letters, numbers, and hyphens only.</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Industry</label>
+                  <input
+                    type="text"
+                    value={createForm.industry}
+                    onChange={(e) => setCreateForm({ ...createForm, industry: e.target.value })}
+                    placeholder="Real Estate, Healthcare, etc."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Timezone</label>
+                    <select
+                      value={createForm.timezone}
+                      onChange={(e) => setCreateForm({ ...createForm, timezone: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="America/New_York">Eastern</option>
+                      <option value="America/Chicago">Central</option>
+                      <option value="America/Denver">Mountain</option>
+                      <option value="America/Los_Angeles">Pacific</option>
+                      <option value="UTC">UTC</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Language</label>
+                    <select
+                      value={createForm.primary_language}
+                      onChange={(e) => setCreateForm({ ...createForm, primary_language: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="en">English</option>
+                      <option value="es">Spanish</option>
+                      <option value="fr">French</option>
+                    </select>
+                  </div>
+                </div>
+                <button
+                  onClick={() => createMutation.mutate(createForm)}
+                  disabled={!createForm.name.trim() || !createForm.slug.trim() || createMutation.isPending}
+                  className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  {createMutation.isPending ? 'Creating...' : 'Create Client'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Client Modal */}
+      {editingClient && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen px-4">
+            <div className="fixed inset-0 bg-black/50" onClick={() => setEditingClient(null)} />
+            <div className="relative bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">Edit Client</h3>
+                <button onClick={() => setEditingClient(null)} className="text-gray-400 hover:text-gray-600">
+                  <XMarkIcon className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                  <input
+                    type="text"
+                    defaultValue={editingClient.name}
+                    id="edit-client-name"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Industry</label>
+                  <input
+                    type="text"
+                    defaultValue={editingClient.industry || ''}
+                    id="edit-client-industry"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <button
+                  onClick={() => {
+                    const name = (document.getElementById('edit-client-name') as HTMLInputElement)?.value;
+                    const industry = (document.getElementById('edit-client-industry') as HTMLInputElement)?.value;
+                    updateMutation.mutate({ id: editingClient.id, data: { name, industry } });
+                  }}
+                  disabled={updateMutation.isPending}
+                  className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

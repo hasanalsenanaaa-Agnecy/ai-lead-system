@@ -2,7 +2,7 @@
 Database Connection and Session Management
 Async SQLAlchemy with connection pooling for PostgreSQL
 """
-from sqlalchemy import text
+
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -82,11 +82,13 @@ async def init_db() -> None:
     Called on application startup.
     """
     from app.db.models import Base
+    # Import auth models so they're registered with Base.metadata
+    from app.db import models_auth  # noqa: F401
 
-    async with engine.connect() as conn:
+    async with engine.begin() as conn:
         # Create all tables (in production, use Alembic migrations instead)
         if settings.is_development:
-            await conn.execute(text("SELECT 1"))
+            await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, checkfirst=True))
 
 
 async def close_db() -> None:
@@ -133,6 +135,4 @@ async def tenant_context(client_id: str) -> AsyncGenerator[None, None]:
         yield
     finally:
         TenantContext.clear()
-
-# Alias for backward compatibility
 get_db = get_db_session

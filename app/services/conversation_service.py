@@ -44,14 +44,10 @@ class ConversationService:
         conversation = Conversation(
             client_id=client_id,
             lead_id=lead_id,
-            channel=channel,
-            channel_conversation_id=channel_conversation_id,
+            channel=channel.value if isinstance(channel, ChannelType) else channel,
+            session_id=channel_conversation_id,
             is_active=True,
             message_count=0,
-            agent_message_count=0,
-            lead_message_count=0,
-            total_tokens_used=0,
-            metadata=metadata or {},
         )
 
         self.db.add(conversation)
@@ -76,12 +72,12 @@ class ConversationService:
                 and_(
                     Conversation.client_id == client_id,
                     Conversation.lead_id == lead_id,
-                    Conversation.channel == channel,
+                    Conversation.channel == (channel.value if isinstance(channel, ChannelType) else channel),
                     Conversation.is_active == True,
-                    Conversation.last_message_at >= cutoff,
+                    Conversation.updated_at >= cutoff,
                 )
             )
-            .order_by(Conversation.last_message_at.desc())
+            .order_by(Conversation.updated_at.desc())
         )
         return result.scalar_one_or_none()
 
@@ -118,7 +114,7 @@ class ConversationService:
             select(Conversation).where(
                 and_(
                     Conversation.client_id == client_id,
-                    Conversation.channel_conversation_id == session_id,
+                    Conversation.session_id == session_id,
                     Conversation.is_active == True,
                 )
             )
@@ -155,7 +151,7 @@ class ConversationService:
         """Add a message to a conversation."""
         message = Message(
             conversation_id=conversation_id,
-            role=MessageRole(role),
+            role=role.value if isinstance(role, MessageRole) else (MessageRole(role).value if isinstance(role, str) and role in [e.value for e in MessageRole] else role),
             content=content,
             content_type=content_type,
             tokens_input=tokens_input,
@@ -167,7 +163,7 @@ class ConversationService:
             intent=intent,
             sentiment=sentiment,
             entities=entities,
-            metadata=metadata or {},
+            msg_metadata=metadata or {},
         )
 
         self.db.add(message)
@@ -176,15 +172,6 @@ class ConversationService:
         conversation = await self.get_by_id(conversation_id)
         if conversation:
             conversation.message_count += 1
-            if role == "lead":
-                conversation.lead_message_count += 1
-            elif role == "agent":
-                conversation.agent_message_count += 1
-            conversation.total_tokens_used += tokens_input + tokens_output
-            conversation.last_message_at = datetime.utcnow()
-
-            if not conversation.first_response_at and role == "agent":
-                conversation.first_response_at = datetime.utcnow()
 
         await self.db.flush()
         await self.db.refresh(message)
@@ -242,7 +229,7 @@ class ConversationService:
 
         history = []
         for msg in messages:
-            role = "user" if msg.role == MessageRole.LEAD else "assistant"
+            role = "user" if msg.role == MessageRole.LEAD.value else "assistant"
             history.append({"role": role, "content": msg.content})
 
         return history
@@ -259,7 +246,7 @@ class ConversationService:
             return None
 
         conversation.is_escalated = True
-        conversation.escalation_reason = reason
+        conversation.escalation_reason = reason.value if isinstance(reason, EscalationReason) else reason
         conversation.escalated_at = datetime.utcnow()
 
         await self.db.flush()
@@ -291,7 +278,6 @@ class ConversationService:
             return None
 
         conversation.summary = summary
-        conversation.summary_updated_at = datetime.utcnow()
 
         await self.db.flush()
         return conversation
@@ -326,7 +312,7 @@ class ConversationService:
                     Conversation.is_active == True,
                 )
             )
-            .order_by(Conversation.last_message_at.desc())
+            .order_by(Conversation.updated_at.desc())
             .limit(limit)
         )
         return list(result.scalars().all())
@@ -365,9 +351,9 @@ class ConversationService:
         prev_lead_msg = None
 
         for msg in messages:
-            if msg.role == MessageRole.LEAD:
+            if msg.role == MessageRole.LEAD.value:
                 prev_lead_msg = msg
-            elif msg.role == MessageRole.AGENT and prev_lead_msg:
+            elif msg.role == MessageRole.AGENT.value and prev_lead_msg:
                 diff = (msg.created_at - prev_lead_msg.created_at).total_seconds() * 1000
                 response_times.append(int(diff))
                 prev_lead_msg = None

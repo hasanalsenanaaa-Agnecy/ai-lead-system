@@ -150,10 +150,11 @@ class KnowledgeService:
                 knowledge_base_id=kb_id,
                 content=chunk["text"],
                 content_hash=content_hash,
-                embedding=embedding,
+                embedding=str(embedding),
                 source=source,
                 chunk_index=i,
-                metadata=metadata or {},
+                token_count=len(chunk["text"].split()),
+                chunk_metadata=metadata or {},
             )
             self.db.add(chunk_obj)
             chunk_count += 1
@@ -438,12 +439,14 @@ class KnowledgeService:
         if not settings.openai_api_key:
             raise ValueError("OpenAI API key not configured")
         
+        api_key = settings.openai_api_key.get_secret_value()
+        
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
                     "https://api.openai.com/v1/embeddings",
                     headers={
-                        "Authorization": f"Bearer {settings.openai_api_key}",
+                        "Authorization": f"Bearer {api_key}",
                         "Content-Type": "application/json",
                     },
                     json={

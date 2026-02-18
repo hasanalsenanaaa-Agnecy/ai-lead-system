@@ -7,8 +7,8 @@ from sqlalchemy import select, func, and_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
-from app.db.session import get_db
-from app.db.models import Lead, Conversation, Message, Escalation, Client
+from app.db.session import get_db_session as get_db
+from app.db.models import Lead, Conversation, Message, Escalation, Client, LeadScore, LeadStatus, MessageRole
 
 router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
@@ -121,16 +121,16 @@ async def get_dashboard_stats(
     )
     score_counts = {row[0]: row[1] for row in score_counts_result.fetchall()}
     
-    hot_leads = score_counts.get('hot', 0)
-    warm_leads = score_counts.get('warm', 0)
-    cold_leads = score_counts.get('cold', 0)
+    hot_leads = score_counts.get(LeadScore.HOT.value, 0)
+    warm_leads = score_counts.get(LeadScore.WARM.value, 0)
+    cold_leads = score_counts.get(LeadScore.COLD.value, 0)
 
     # Appointments booked
     appointments_result = await db.execute(
         select(func.count(Lead.id)).where(
             and_(
                 Lead.client_id == client_id,
-                Lead.status == 'appointment_booked'
+                Lead.status == LeadStatus.APPOINTMENT_BOOKED.value
             )
         )
     )
@@ -165,7 +165,7 @@ async def get_dashboard_stats(
         .where(
             and_(
                 Conversation.client_id == client_id,
-                Message.role == 'agent',
+                Message.role == MessageRole.AGENT.value,
                 Message.processing_time_ms.isnot(None)
             )
         )
@@ -173,7 +173,12 @@ async def get_dashboard_stats(
     avg_response_time_ms = avg_response_result.scalar() or 0
 
     # Qualification rate (leads that became qualified, appointment_booked, or handed_off)
-    qualified_statuses = ['qualified', 'appointment_booked', 'handed_off', 'closed_won']
+    qualified_statuses = [
+        LeadStatus.QUALIFIED.value,
+        LeadStatus.APPOINTMENT_BOOKED.value,
+        LeadStatus.HANDED_OFF.value,
+        LeadStatus.CLOSED_WON.value,
+    ]
     qualified_result = await db.execute(
         select(func.count(Lead.id)).where(
             and_(
@@ -249,7 +254,7 @@ async def get_leads_by_day(
         if date_str not in daily_data:
             daily_data[date_str] = {'total': 0, 'hot': 0, 'warm': 0, 'cold': 0}
         daily_data[date_str]['total'] += row.count
-        if row.score in ['hot', 'warm', 'cold']:
+        if row.score in [LeadScore.HOT.value, LeadScore.WARM.value, LeadScore.COLD.value]:
             daily_data[date_str][row.score] += row.count
 
     # Fill in missing days
@@ -280,14 +285,14 @@ async def get_leads_by_channel(
     """Get lead distribution by source channel."""
     
     result = await db.execute(
-        select(Lead.source, func.count(Lead.id).label('count'))
+        select(Lead.source_channel, func.count(Lead.id).label('count'))
         .where(
             and_(
                 Lead.client_id == client_id,
-                Lead.source.isnot(None)
+                Lead.source_channel.isnot(None)
             )
         )
-        .group_by(Lead.source)
+        .group_by(Lead.source_channel)
         .order_by(func.count(Lead.id).desc())
     )
     
@@ -296,7 +301,7 @@ async def get_leads_by_channel(
     
     return [
         LeadsByChannel(
-            channel=row.source or 'unknown',
+            channel=row.source_channel or 'unknown',
             count=row.count,
             percentage=round(row.count / total * 100, 1) if total > 0 else 0
         )

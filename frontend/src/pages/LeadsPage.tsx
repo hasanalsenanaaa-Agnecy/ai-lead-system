@@ -1,23 +1,26 @@
-// Leads Management Page
+// Leads Management Page - Connected to Backend API
 
 import { useState, useMemo } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { Link, useSearchParams, useParams } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import { clsx } from 'clsx';
+import toast from 'react-hot-toast';
 import {
   MagnifyingGlassIcon,
-  FunnelIcon,
   PhoneIcon,
   EnvelopeIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  FireIcon,
   ArrowPathIcon,
+  XMarkIcon,
+  ChatBubbleLeftRightIcon,
+  CalendarIcon,
+  UserIcon,
 } from '@heroicons/react/24/outline';
 import { useClientStore } from '../store';
-import { leadsApi } from '../api';
-import type { Lead, LeadScore, LeadStatus, ChannelType } from '../types';
+import { leadsApi, conversationsApi } from '../api';
+import type { Lead, LeadScore, LeadStatus } from '../types';
 
 const SCORE_COLORS: Record<LeadScore, string> = {
   hot: 'bg-red-100 text-red-700 border-red-200',
@@ -38,458 +41,484 @@ const STATUS_COLORS: Record<LeadStatus, string> = {
   disqualified: 'bg-gray-100 text-gray-700',
 };
 
-// Mock data for demo
-const mockLeads: Lead[] = [
-  {
-    id: '1',
-    client_id: '1',
-    name: 'Ahmed Al-Rashid',
-    first_name: 'Ahmed',
-    last_name: 'Al-Rashid',
-    email: 'ahmed@example.com',
-    phone: '+966501234567',
-    status: 'qualifying',
-    score: 'hot',
-    source: 'whatsapp',
-    service_interest: 'Home Purchase - Villa',
-    urgency: 'This week',
-    budget_range: '800K-1.2M SAR',
-    location: 'Riyadh',
-    qualification_data: {},
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    client_id: '1',
-    name: 'Sarah Johnson',
-    first_name: 'Sarah',
-    last_name: 'Johnson',
-    email: 'sarah.j@example.com',
-    phone: '+14155551234',
-    status: 'appointment_booked',
-    score: 'warm',
-    source: 'web_form',
-    service_interest: 'Rental Property',
-    urgency: 'Next month',
-    budget_range: '5K-8K/month',
-    location: 'Jeddah',
-    qualification_data: {},
-    appointment_at: new Date(Date.now() + 86400000 * 2).toISOString(),
-    created_at: new Date(Date.now() - 3600000).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: '3',
-    client_id: '1',
-    name: 'Mohammed Hassan',
-    first_name: 'Mohammed',
-    last_name: 'Hassan',
-    email: 'mhassan@company.com',
-    phone: '+966551234567',
-    status: 'new',
-    score: 'cold',
-    source: 'sms',
-    service_interest: 'Investment Property',
-    urgency: 'Exploring options',
-    qualification_data: {},
-    created_at: new Date(Date.now() - 7200000).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: '4',
-    client_id: '1',
-    name: 'Fatima Al-Saud',
-    first_name: 'Fatima',
-    last_name: 'Al-Saud',
-    email: 'fatima@example.com',
-    phone: '+966509876543',
-    status: 'handed_off',
-    score: 'hot',
-    source: 'missed_call',
-    service_interest: 'Luxury Apartment',
-    urgency: 'Urgent - Today',
-    budget_range: '2M+ SAR',
-    location: 'Riyadh - Diplomatic Quarter',
-    qualification_data: {},
-    handed_off_at: new Date(Date.now() - 1800000).toISOString(),
-    created_at: new Date(Date.now() - 3600000 * 5).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-] as Lead[];
+const STATUS_LABELS: Record<LeadStatus, string> = {
+  new: 'New',
+  qualifying: 'Qualifying',
+  qualified: 'Qualified',
+  appointment_booked: 'Appointment Booked',
+  handed_off: 'Handed Off',
+  nurturing: 'Nurturing',
+  closed_won: 'Won',
+  closed_lost: 'Lost',
+  disqualified: 'Disqualified',
+};
 
-function ScoreBadge({ score }: { score: LeadScore }) {
+function LeadDetailPanel({ lead, onClose }: { lead: Lead; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const { currentClient } = useClientStore();
+
+  // Fetch conversations for this lead
+  const { data: conversationsData } = useQuery({
+    queryKey: ['lead-conversations', lead.id],
+    queryFn: () => conversationsApi.list(currentClient?.id || '', { }, 1, 10),
+    enabled: !!currentClient?.id,
+  });
+
+  // Update lead mutation
+  const updateLeadMutation = useMutation({
+    mutationFn: (updates: Partial<Lead>) => leadsApi.update(lead.id, updates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      toast.success('Lead updated');
+    },
+    onError: () => {
+      toast.error('Failed to update lead');
+    },
+  });
+
+  // Handoff mutation
+  const handoffMutation = useMutation({
+    mutationFn: () => leadsApi.handoff(lead.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      toast.success('Lead handed off successfully');
+    },
+    onError: () => {
+      toast.error('Failed to hand off lead');
+    },
+  });
+
+  const conversations = conversationsData?.items?.filter(c => c.lead_id === lead.id) || [];
+
   return (
-    <span
-      className={clsx(
-        'inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize',
-        SCORE_COLORS[score]
-      )}
-    >
-      {score === 'hot' && <FireIcon className="h-3 w-3" />}
-      {score}
-    </span>
+    <div className="fixed inset-y-0 right-0 w-full max-w-xl bg-white shadow-xl border-l border-gray-200 z-50 overflow-hidden flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+        <h2 className="text-lg font-semibold text-gray-900">Lead Details</h2>
+        <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+          <XMarkIcon className="h-5 w-5 text-gray-500" />
+        </button>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {/* Contact Info */}
+        <div className="space-y-4">
+          <div className="flex items-center space-x-3">
+            <div className="h-12 w-12 bg-blue-100 rounded-full flex items-center justify-center">
+              <UserIcon className="h-6 w-6 text-blue-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-gray-900">{lead.name || 'Unknown'}</h3>
+              <p className="text-sm text-gray-500">{lead.service_interest || 'No service selected'}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex items-center space-x-2 text-sm">
+              <EnvelopeIcon className="h-4 w-4 text-gray-400" />
+              <span className="text-gray-600">{lead.email || 'No email'}</span>
+            </div>
+            <div className="flex items-center space-x-2 text-sm">
+              <PhoneIcon className="h-4 w-4 text-gray-400" />
+              <span className="text-gray-600">{lead.phone || 'No phone'}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Score & Status */}
+        <div className="flex items-center space-x-3">
+          <span className={clsx('px-3 py-1 rounded-full text-sm font-medium border', SCORE_COLORS[lead.score])}>
+            {lead.score.charAt(0).toUpperCase() + lead.score.slice(1)}
+          </span>
+          <span className={clsx('px-3 py-1 rounded-full text-sm font-medium', STATUS_COLORS[lead.status])}>
+            {STATUS_LABELS[lead.status]}
+          </span>
+        </div>
+
+        {/* Details */}
+        <div className="bg-gray-50 rounded-lg p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <p className="text-gray-500">Location</p>
+              <p className="font-medium">{lead.location || 'Not specified'}</p>
+            </div>
+            <div>
+              <p className="text-gray-500">Budget</p>
+              <p className="font-medium">{lead.budget_range || 'Not specified'}</p>
+            </div>
+            <div>
+              <p className="text-gray-500">Urgency</p>
+              <p className="font-medium">{lead.urgency || 'Not specified'}</p>
+            </div>
+            <div>
+              <p className="text-gray-500">Source</p>
+              <p className="font-medium">{lead.source?.replace('_', ' ').toUpperCase() || 'Unknown'}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Appointment */}
+        {lead.appointment_at && (
+          <div className="bg-indigo-50 rounded-lg p-4">
+            <div className="flex items-center space-x-2">
+              <CalendarIcon className="h-5 w-5 text-indigo-600" />
+              <span className="font-medium text-indigo-900">
+                Appointment: {format(parseISO(lead.appointment_at), 'MMM d, yyyy h:mm a')}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Recent Conversations */}
+        <div>
+          <h4 className="font-medium text-gray-900 mb-3">Recent Conversations</h4>
+          {conversations.length > 0 ? (
+            <div className="space-y-2">
+              {conversations.slice(0, 3).map((conv) => (
+                <Link
+                  key={conv.id}
+                  to={`/conversations/${conv.id}`}
+                  className="block p-3 bg-gray-50 hover:bg-gray-100 rounded-lg"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <ChatBubbleLeftRightIcon className="h-4 w-4 text-gray-400" />
+                      <span className="text-sm font-medium">{conv.channel.replace('_', ' ')}</span>
+                    </div>
+                    <span className="text-xs text-gray-500">
+                      {format(parseISO(conv.created_at), 'MMM d')}
+                    </span>
+                  </div>
+                  {conv.summary && (
+                    <p className="text-sm text-gray-600 mt-1 truncate">{conv.summary}</p>
+                  )}
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">No conversations yet</p>
+          )}
+        </div>
+
+        {/* Timeline */}
+        <div>
+          <h4 className="font-medium text-gray-900 mb-3">Activity</h4>
+          <div className="text-sm text-gray-500 space-y-2">
+            <p>Created: {format(parseISO(lead.created_at), 'MMM d, yyyy h:mm a')}</p>
+            <p>Updated: {format(parseISO(lead.updated_at), 'MMM d, yyyy h:mm a')}</p>
+            {lead.handed_off_at && (
+              <p>Handed off: {format(parseISO(lead.handed_off_at), 'MMM d, yyyy h:mm a')}</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="border-t border-gray-200 p-4 space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <select
+            value={lead.score}
+            onChange={(e) => updateLeadMutation.mutate({ score: e.target.value as LeadScore })}
+            className="block w-full rounded-lg border-gray-300 text-sm"
+          >
+            <option value="hot">🔥 Hot</option>
+            <option value="warm">🌤️ Warm</option>
+            <option value="cold">❄️ Cold</option>
+            <option value="unscored">⚪ Unscored</option>
+          </select>
+          <select
+            value={lead.status}
+            onChange={(e) => updateLeadMutation.mutate({ status: e.target.value as LeadStatus })}
+            className="block w-full rounded-lg border-gray-300 text-sm"
+          >
+            {Object.entries(STATUS_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </div>
+        <button
+          onClick={() => handoffMutation.mutate()}
+          disabled={lead.status === 'handed_off' || handoffMutation.isPending}
+          className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {handoffMutation.isPending ? 'Handing off...' : 'Hand Off to Sales'}
+        </button>
+      </div>
+    </div>
   );
 }
 
-function StatusBadge({ status }: { status: LeadStatus }) {
+function LeadRow({ lead, onClick }: { lead: Lead; onClick: () => void }) {
   return (
-    <span
-      className={clsx(
-        'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-        STATUS_COLORS[status]
-      )}
+    <tr 
+      onClick={onClick}
+      className="hover:bg-gray-50 cursor-pointer border-b border-gray-100"
     >
-      {status.replace(/_/g, ' ')}
-    </span>
-  );
-}
-
-function ChannelBadge({ channel }: { channel: string }) {
-  const colors: Record<string, string> = {
-    web_form: 'bg-blue-50 text-blue-700',
-    whatsapp: 'bg-green-50 text-green-700',
-    sms: 'bg-purple-50 text-purple-700',
-    missed_call: 'bg-orange-50 text-orange-700',
-    live_chat: 'bg-cyan-50 text-cyan-700',
-    email: 'bg-gray-50 text-gray-700',
-  };
-
-  return (
-    <span
-      className={clsx(
-        'inline-flex items-center rounded px-2 py-0.5 text-xs font-medium',
-        colors[channel] || 'bg-gray-50 text-gray-700'
-      )}
-    >
-      {channel.replace(/_/g, ' ')}
-    </span>
+      <td className="px-4 py-3">
+        <div className="flex items-center space-x-3">
+          <div
+            className={clsx(
+              'h-2 w-2 rounded-full flex-shrink-0',
+              lead.score === 'hot' && 'bg-red-500',
+              lead.score === 'warm' && 'bg-yellow-500',
+              lead.score === 'cold' && 'bg-blue-500',
+              lead.score === 'unscored' && 'bg-gray-400'
+            )}
+          />
+          <div>
+            <p className="font-medium text-gray-900">{lead.name || 'Unknown'}</p>
+            <p className="text-sm text-gray-500">{lead.email || lead.phone}</p>
+          </div>
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <span className={clsx('px-2 py-1 rounded-full text-xs font-medium border', SCORE_COLORS[lead.score])}>
+          {lead.score}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        <span className={clsx('px-2 py-1 rounded-full text-xs font-medium', STATUS_COLORS[lead.status])}>
+          {STATUS_LABELS[lead.status]}
+        </span>
+      </td>
+      <td className="px-4 py-3 text-sm text-gray-600">
+        {lead.source?.replace('_', ' ').toUpperCase() || '-'}
+      </td>
+      <td className="px-4 py-3 text-sm text-gray-600">
+        {lead.service_interest || '-'}
+      </td>
+      <td className="px-4 py-3 text-sm text-gray-500">
+        {format(parseISO(lead.created_at), 'MMM d, h:mm a')}
+      </td>
+    </tr>
   );
 }
 
 export default function LeadsPage() {
+  const { id } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const { currentClient } = useClientStore();
+
+  const [search, setSearch] = useState('');
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   
-  const [search, setSearch] = useState(searchParams.get('search') || '');
-  const [scoreFilter, setScoreFilter] = useState<LeadScore | ''>(
-    (searchParams.get('score') as LeadScore) || ''
-  );
-  const [statusFilter, setStatusFilter] = useState<LeadStatus | ''>(
-    (searchParams.get('status') as LeadStatus) || ''
-  );
-  const [channelFilter, setChannelFilter] = useState<ChannelType | ''>(
-    (searchParams.get('channel') as ChannelType) || ''
-  );
-  const [page, setPage] = useState(1);
-  const perPage = 10;
+  // Get filters from URL
+  const scoreFilter = searchParams.get('score') as LeadScore | null;
+  const statusFilter = searchParams.get('status') as LeadStatus | null;
+  const page = parseInt(searchParams.get('page') || '1', 10);
 
-  // Filter leads (replace with API call in production)
-  const filteredLeads = useMemo(() => {
-    return mockLeads.filter((lead) => {
-      if (search) {
-        const searchLower = search.toLowerCase();
-        const matchesSearch =
-          lead.name?.toLowerCase().includes(searchLower) ||
-          lead.email?.toLowerCase().includes(searchLower) ||
-          lead.phone?.includes(search);
-        if (!matchesSearch) return false;
-      }
-      if (scoreFilter && lead.score !== scoreFilter) return false;
-      if (statusFilter && lead.status !== statusFilter) return false;
-      if (channelFilter && lead.source !== channelFilter) return false;
-      return true;
-    });
-  }, [search, scoreFilter, statusFilter, channelFilter]);
+  // Fetch leads
+  const {
+    data: leadsData,
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ['leads', currentClient?.id, scoreFilter, statusFilter, search, page],
+    queryFn: () => leadsApi.list(
+      currentClient?.id || '',
+      {
+        score: scoreFilter || undefined,
+        status: statusFilter || undefined,
+        search: search || undefined,
+      },
+      page,
+      20
+    ),
+    enabled: !!currentClient?.id,
+    staleTime: 30000,
+  });
 
-  const totalPages = Math.ceil(filteredLeads.length / perPage);
-  const paginatedLeads = filteredLeads.slice((page - 1) * perPage, page * perPage);
+  // Fetch single lead if ID in URL
+  const { data: singleLead } = useQuery({
+    queryKey: ['lead', id],
+    queryFn: () => leadsApi.get(id!),
+    enabled: !!id,
+  });
 
-  const handleSearch = (value: string) => {
-    setSearch(value);
-    setPage(1);
+  // Set selected lead when URL has ID
+  useMemo(() => {
+    if (singleLead) {
+      setSelectedLead(singleLead);
+    }
+  }, [singleLead]);
+
+  const leads = leadsData?.items || [];
+  const totalPages = leadsData?.pages || 1;
+
+  const handleFilterChange = (key: string, value: string | null) => {
+    const newParams = new URLSearchParams(searchParams);
+    if (value) {
+      newParams.set(key, value);
+    } else {
+      newParams.delete(key);
+    }
+    newParams.set('page', '1');
+    setSearchParams(newParams);
   };
 
-  const clearFilters = () => {
-    setSearch('');
-    setScoreFilter('');
-    setStatusFilter('');
-    setChannelFilter('');
-    setPage(1);
-    setSearchParams({});
+  const handlePageChange = (newPage: number) => {
+    const newParams = new URLSearchParams(searchParams);
+    newParams.set('page', newPage.toString());
+    setSearchParams(newParams);
   };
 
-  const hasFilters = search || scoreFilter || statusFilter || channelFilter;
+  if (!currentClient) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p className="text-gray-500">Please select a client to view leads</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Leads</h1>
-          <p className="text-gray-500">
-            {filteredLeads.length} total leads
-            {hasFilters && ' (filtered)'}
-          </p>
+          <p className="text-gray-500">Manage and track your leads</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => window.location.reload()}
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            <ArrowPathIcon className="h-4 w-4" />
-            Refresh
-          </button>
-        </div>
+        <button
+          onClick={() => refetch()}
+          className="flex items-center space-x-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+        >
+          <ArrowPathIcon className="h-4 w-4" />
+          <span>Refresh</span>
+        </button>
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-        <div className="flex flex-col lg:flex-row gap-4">
-          {/* Search */}
-          <div className="flex-1">
-            <div className="relative">
-              <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search by name, email, or phone..."
-                value={search}
-                onChange={(e) => handleSearch(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-4 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
+      <div className="flex flex-wrap items-center gap-4 bg-white p-4 rounded-xl border border-gray-200">
+        <div className="flex-1 min-w-[200px]">
+          <div className="relative">
+            <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search leads..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
           </div>
-
-          {/* Score Filter */}
-          <select
-            value={scoreFilter}
-            onChange={(e) => {
-              setScoreFilter(e.target.value as LeadScore | '');
-              setPage(1);
-            }}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          >
-            <option value="">All Scores</option>
-            <option value="hot">🔥 Hot</option>
-            <option value="warm">🌡️ Warm</option>
-            <option value="cold">❄️ Cold</option>
-            <option value="unscored">Unscored</option>
-          </select>
-
-          {/* Status Filter */}
-          <select
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value as LeadStatus | '');
-              setPage(1);
-            }}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          >
-            <option value="">All Statuses</option>
-            <option value="new">New</option>
-            <option value="qualifying">Qualifying</option>
-            <option value="qualified">Qualified</option>
-            <option value="appointment_booked">Appointment Booked</option>
-            <option value="handed_off">Handed Off</option>
-            <option value="nurturing">Nurturing</option>
-            <option value="closed_won">Closed Won</option>
-            <option value="closed_lost">Closed Lost</option>
-          </select>
-
-          {/* Channel Filter */}
-          <select
-            value={channelFilter}
-            onChange={(e) => {
-              setChannelFilter(e.target.value as ChannelType | '');
-              setPage(1);
-            }}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          >
-            <option value="">All Channels</option>
-            <option value="web_form">Web Form</option>
-            <option value="whatsapp">WhatsApp</option>
-            <option value="sms">SMS</option>
-            <option value="missed_call">Missed Call</option>
-            <option value="live_chat">Live Chat</option>
-          </select>
-
-          {hasFilters && (
-            <button
-              onClick={clearFilters}
-              className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
-            >
-              Clear
-            </button>
-          )}
         </div>
+
+        <select
+          value={scoreFilter || ''}
+          onChange={(e) => handleFilterChange('score', e.target.value || null)}
+          className="px-4 py-2 border border-gray-300 rounded-lg"
+        >
+          <option value="">All Scores</option>
+          <option value="hot">🔥 Hot</option>
+          <option value="warm">🌤️ Warm</option>
+          <option value="cold">❄️ Cold</option>
+        </select>
+
+        <select
+          value={statusFilter || ''}
+          onChange={(e) => handleFilterChange('status', e.target.value || null)}
+          className="px-4 py-2 border border-gray-300 rounded-lg"
+        >
+          <option value="">All Statuses</option>
+          {Object.entries(STATUS_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
+
+        {(scoreFilter || statusFilter) && (
+          <button
+            onClick={() => {
+              setSearchParams(new URLSearchParams());
+            }}
+            className="text-sm text-blue-600 hover:text-blue-800"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        {isLoading ? (
+          <div className="p-8 text-center">
+            <div className="animate-spin h-8 w-8 border-2 border-blue-600 border-t-transparent rounded-full mx-auto"></div>
+            <p className="mt-2 text-gray-500">Loading leads...</p>
+          </div>
+        ) : isError ? (
+          <div className="p-8 text-center">
+            <p className="text-red-600">Failed to load leads</p>
+            <button onClick={() => refetch()} className="mt-2 text-blue-600 hover:underline">
+              Try again
+            </button>
+          </div>
+        ) : leads.length === 0 ? (
+          <div className="p-8 text-center">
+            <p className="text-gray-500">No leads found</p>
+          </div>
+        ) : (
+          <table className="min-w-full">
+            <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Lead
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Contact
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Score
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Channel
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Interest
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Created
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Interest</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {paginatedLeads.map((lead) => (
-                <tr key={lead.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div>
-                      <Link
-                        to={`/leads/${lead.id}`}
-                        className="font-medium text-gray-900 hover:text-blue-600"
-                      >
-                        {lead.name || 'Unknown'}
-                      </Link>
-                      {lead.location && (
-                        <p className="text-sm text-gray-500">{lead.location}</p>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="space-y-1">
-                      {lead.phone && (
-                        <a
-                          href={`tel:${lead.phone}`}
-                          className="flex items-center gap-1 text-sm text-gray-600 hover:text-blue-600"
-                        >
-                          <PhoneIcon className="h-4 w-4" />
-                          {lead.phone}
-                        </a>
-                      )}
-                      {lead.email && (
-                        <a
-                          href={`mailto:${lead.email}`}
-                          className="flex items-center gap-1 text-sm text-gray-600 hover:text-blue-600"
-                        >
-                          <EnvelopeIcon className="h-4 w-4" />
-                          {lead.email}
-                        </a>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <ScoreBadge score={lead.score} />
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <StatusBadge status={lead.status} />
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {lead.source && <ChannelBadge channel={lead.source} />}
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="max-w-xs">
-                      <p className="text-sm text-gray-900 truncate">
-                        {lead.service_interest || '-'}
-                      </p>
-                      {lead.urgency && (
-                        <p className="text-xs text-gray-500">{lead.urgency}</p>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {format(parseISO(lead.created_at), 'MMM d, h:mm a')}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right">
-                    <Link
-                      to={`/leads/${lead.id}`}
-                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                    >
-                      View
-                    </Link>
-                  </td>
-                </tr>
+            <tbody>
+              {leads.map((lead) => (
+                <LeadRow
+                  key={lead.id}
+                  lead={lead}
+                  onClick={() => setSelectedLead(lead)}
+                />
               ))}
-              {paginatedLeads.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
-                    No leads found
-                    {hasFilters && (
-                      <button
-                        onClick={clearFilters}
-                        className="block mx-auto mt-2 text-blue-600 hover:text-blue-800"
-                      >
-                        Clear filters
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
-        </div>
+        )}
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 sm:px-6">
-            <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
-              <p className="text-sm text-gray-700">
-                Showing <span className="font-medium">{(page - 1) * perPage + 1}</span> to{' '}
-                <span className="font-medium">
-                  {Math.min(page * perPage, filteredLeads.length)}
-                </span>{' '}
-                of <span className="font-medium">{filteredLeads.length}</span> results
-              </p>
-              <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm">
-                <button
-                  onClick={() => setPage(Math.max(1, page - 1))}
-                  disabled={page === 1}
-                  className="relative inline-flex items-center rounded-l-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronLeftIcon className="h-5 w-5" />
-                </button>
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => setPage(p)}
-                    className={clsx(
-                      'relative inline-flex items-center px-4 py-2 text-sm font-semibold ring-1 ring-inset ring-gray-300',
-                      p === page
-                        ? 'z-10 bg-blue-600 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600'
-                        : 'text-gray-900 hover:bg-gray-50'
-                    )}
-                  >
-                    {p}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setPage(Math.min(totalPages, page + 1))}
-                  disabled={page === totalPages}
-                  className="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronRightIcon className="h-5 w-5" />
-                </button>
-              </nav>
+          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
+            <p className="text-sm text-gray-500">
+              Page {page} of {totalPages}
+            </p>
+            <div className="flex space-x-2">
+              <button
+                onClick={() => handlePageChange(page - 1)}
+                disabled={page === 1}
+                className="p-2 border border-gray-300 rounded-lg disabled:opacity-50"
+              >
+                <ChevronLeftIcon className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => handlePageChange(page + 1)}
+                disabled={page === totalPages}
+                className="p-2 border border-gray-300 rounded-lg disabled:opacity-50"
+              >
+                <ChevronRightIcon className="h-4 w-4" />
+              </button>
             </div>
           </div>
         )}
       </div>
+
+      {/* Lead Detail Panel */}
+      {selectedLead && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black/30 z-40"
+            onClick={() => setSelectedLead(null)}
+          />
+          <LeadDetailPanel
+            lead={selectedLead}
+            onClose={() => setSelectedLead(null)}
+          />
+        </>
+      )}
     </div>
   );
 }

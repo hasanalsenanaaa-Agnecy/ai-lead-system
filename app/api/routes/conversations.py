@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ChannelType, EscalationReason, MessageRole
@@ -35,7 +35,7 @@ class MessageResponse(BaseModel):
 
     id: UUID
     conversation_id: UUID
-    role: MessageRole
+    role: str
     content: str
     content_type: str
     tokens_input: int
@@ -46,11 +46,12 @@ class MessageResponse(BaseModel):
     external_message_id: str | None
     intent: str | None
     sentiment: str | None
-    metadata: dict[str, Any]
+    msg_metadata: dict[str, Any] | None = Field(default=None, alias="msg_metadata")
     created_at: datetime
 
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 
 class ConversationResponse(BaseModel):
@@ -59,21 +60,16 @@ class ConversationResponse(BaseModel):
     id: UUID
     client_id: UUID
     lead_id: UUID
-    channel: ChannelType
+    channel: str
     is_active: bool
     is_escalated: bool
-    escalation_reason: EscalationReason | None
+    escalation_reason: str | None
     escalated_at: datetime | None
     message_count: int
-    agent_message_count: int
-    lead_message_count: int
-    total_tokens_used: int
-    avg_response_time_ms: int | None
-    first_response_at: datetime | None
-    last_message_at: datetime | None
+    sentiment_score: float | None
     ended_at: datetime | None
+    end_reason: str | None
     summary: str | None
-    metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime
 
@@ -255,7 +251,6 @@ async def get_conversation_metrics(
     return {
         "conversation_id": str(conversation_id),
         "message_count": conversation.message_count,
-        "total_tokens_used": conversation.total_tokens_used,
         **metrics,
     }
 

@@ -12,7 +12,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
-    Enum,
     Float,
     ForeignKey,
     Index,
@@ -158,9 +157,9 @@ class Client(Base, TimestampMixin, SoftDeleteMixin):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    status: Mapped[ClientStatus] = mapped_column(
-        Enum(ClientStatus),
-        default=ClientStatus.ONBOARDING,
+    status: Mapped[str] = mapped_column(
+        String(50),
+        default=ClientStatus.ONBOARDING.value,
         nullable=False,
     )
 
@@ -174,6 +173,12 @@ class Client(Base, TimestampMixin, SoftDeleteMixin):
     owner_name: Mapped[str | None] = mapped_column(String(255))
     owner_email: Mapped[str | None] = mapped_column(String(255))
     owner_phone: Mapped[str | None] = mapped_column(String(50))
+
+    @property
+    def notification_email(self) -> str | None:
+        """Get notification email from config or fallback to owner_email."""
+        config = self.config or {}
+        return config.get("notification_email") or self.owner_email
 
     # Configuration
     config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -229,8 +234,8 @@ class Lead(Base, TimestampMixin, SoftDeleteMixin):
     last_name: Mapped[str | None] = mapped_column(String(100))
 
     # Source & Channel
-    source_channel: Mapped[ChannelType] = mapped_column(
-        Enum(ChannelType),
+    source_channel: Mapped[str] = mapped_column(
+        String(50),
         nullable=False,
     )
     source_campaign: Mapped[str | None] = mapped_column(String(255))
@@ -238,14 +243,14 @@ class Lead(Base, TimestampMixin, SoftDeleteMixin):
     landing_page: Mapped[str | None] = mapped_column(String(500))
 
     # Qualification
-    status: Mapped[LeadStatus] = mapped_column(
-        Enum(LeadStatus),
-        default=LeadStatus.NEW,
+    status: Mapped[str] = mapped_column(
+        String(50),
+        default=LeadStatus.NEW.value,
         nullable=False,
     )
-    score: Mapped[LeadScore] = mapped_column(
-        Enum(LeadScore),
-        default=LeadScore.UNSCORED,
+    score: Mapped[str] = mapped_column(
+        String(50),
+        default=LeadScore.UNSCORED.value,
         nullable=False,
     )
     score_value: Mapped[int] = mapped_column(Integer, default=0)
@@ -258,21 +263,23 @@ class Lead(Base, TimestampMixin, SoftDeleteMixin):
     preferred_contact_time: Mapped[str | None] = mapped_column(String(255))
     location: Mapped[str | None] = mapped_column(String(255))
 
+    # Notes
+    notes: Mapped[str | None] = mapped_column(Text)
+
     # Appointment
-    appointment_scheduled: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    appointment_type: Mapped[str | None] = mapped_column(String(100))
+    appointment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    appointment_notes: Mapped[str | None] = mapped_column(Text)
 
     # Assignment
-    assigned_to: Mapped[str | None] = mapped_column(String(255))
     handed_off_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    handed_off_to: Mapped[str | None] = mapped_column(String(255))
 
     # External IDs
-    external_crm_id: Mapped[str | None] = mapped_column(String(255))
-    external_contact_id: Mapped[str | None] = mapped_column(String(255))
+    crm_contact_id: Mapped[str | None] = mapped_column(String(255))
+    crm_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Metadata
     lead_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    tags: Mapped[list[str] | None] = mapped_column(ARRAY(String))
 
     # Relationships
     client: Mapped["Client"] = relationship(back_populates="leads")
@@ -315,33 +322,32 @@ class Conversation(Base, TimestampMixin):
     )
 
     # Channel
-    channel: Mapped[ChannelType] = mapped_column(Enum(ChannelType), nullable=False)
+    channel: Mapped[str] = mapped_column(String(50), nullable=False)
     channel_conversation_id: Mapped[str | None] = mapped_column(String(255))
 
     # State
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_escalated: Mapped[bool] = mapped_column(Boolean, default=False)
-    escalation_reason: Mapped[EscalationReason | None] = mapped_column(Enum(EscalationReason))
+    escalation_reason: Mapped[str | None] = mapped_column(String(100))
     escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Session
+    session_id: Mapped[str | None] = mapped_column(String(255))
+    external_conversation_id: Mapped[str | None] = mapped_column(String(255))
+
+    # Escalation details
+    escalation_details: Mapped[str | None] = mapped_column(Text)
 
     # Metrics
     message_count: Mapped[int] = mapped_column(Integer, default=0)
-    agent_message_count: Mapped[int] = mapped_column(Integer, default=0)
-    lead_message_count: Mapped[int] = mapped_column(Integer, default=0)
-    total_tokens_used: Mapped[int] = mapped_column(Integer, default=0)
-    avg_response_time_ms: Mapped[int | None] = mapped_column(Integer)
-
-    # Timing
-    first_response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sentiment_score: Mapped[float | None] = mapped_column(Float)
 
     # Summary (for long-term memory)
     summary: Mapped[str | None] = mapped_column(Text)
-    summary_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    # Metadata
-    lead_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # Timing
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    end_reason: Mapped[str | None] = mapped_column(String(100))
 
     # Relationships
     client: Mapped["Client"] = relationship(back_populates="conversations")
@@ -356,8 +362,6 @@ class Conversation(Base, TimestampMixin):
         Index("ix_conversations_client_id", "client_id"),
         Index("ix_conversations_lead_id", "lead_id"),
         Index("ix_conversations_is_active", "is_active"),
-        Index("ix_conversations_channel", "channel"),
-        Index("ix_conversations_created_at", "created_at"),
     )
 
 
@@ -380,7 +384,7 @@ class Message(Base, TimestampMixin):
     )
 
     # Content
-    role: Mapped[MessageRole] = mapped_column(Enum(MessageRole), nullable=False)
+    role: Mapped[str] = mapped_column(String(50), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     content_type: Mapped[str] = mapped_column(String(50), default="text")
 
@@ -401,7 +405,9 @@ class Message(Base, TimestampMixin):
     entities: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
     # Metadata
-    lead_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    msg_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSON, default=dict
+    )
 
     # Relationships
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
@@ -441,6 +447,7 @@ class KnowledgeBase(Base, TimestampMixin, SoftDeleteMixin):
     # Status
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    document_count: Mapped[int] = mapped_column(Integer, default=0)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships
@@ -481,14 +488,21 @@ class KnowledgeChunk(Base, TimestampMixin):
 
     # Content
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str | None] = mapped_column(String(64))
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    source: Mapped[str | None] = mapped_column(String(500))
 
-    # Embedding stored separately in pgvector extension
-    # We'll create a separate table for vector storage
+    # Embedding (stored as text-serialized vector for pgvector)
+    embedding: Mapped[str | None] = mapped_column(Text)
+
+    # Status
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Metadata
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    lead_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    chunk_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSON, default=dict
+    )
 
     # Relationships
     knowledge_base: Mapped["KnowledgeBase"] = relationship(back_populates="chunks")
@@ -531,7 +545,7 @@ class QualificationRule(Base, TimestampMixin):
 
     # Scoring Impact
     score_impact: Mapped[int] = mapped_column(Integer, default=0)
-    result_score: Mapped[LeadScore | None] = mapped_column(Enum(LeadScore))
+    result_score: Mapped[str | None] = mapped_column(String(50))
     result_action: Mapped[str | None] = mapped_column(String(100))
 
     # Relationships
@@ -573,7 +587,7 @@ class Escalation(Base, TimestampMixin):
     )
 
     # Escalation Details
-    reason: Mapped[EscalationReason] = mapped_column(Enum(EscalationReason), nullable=False)
+    reason: Mapped[str] = mapped_column(String(100), nullable=False)
     reason_details: Mapped[str | None] = mapped_column(Text)
     priority: Mapped[str] = mapped_column(String(50), default="normal")
 
@@ -586,6 +600,10 @@ class Escalation(Base, TimestampMixin):
     # Notifications
     notification_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     notification_channels: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+
+    # Relationships
+    conversation: Mapped["Conversation"] = relationship(lazy="selectin")
+    lead: Mapped["Lead"] = relationship(lazy="selectin")
 
     __table_args__ = (
         Index("ix_escalations_client_id", "client_id"),

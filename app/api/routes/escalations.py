@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 
-from app.db.session import get_db
+from app.db.session import get_db_session as get_db
 from app.db.models import Escalation, Conversation, Lead
 
 router = APIRouter(prefix="/api/v1/escalations", tags=["escalations"])

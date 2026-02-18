@@ -98,14 +98,14 @@ class LeadService:
             name=name,
             first_name=first_name,
             last_name=last_name,
-            source_channel=source_channel,
+            source_channel=source_channel.value if isinstance(source_channel, ChannelType) else source_channel,
             source_campaign=source_campaign,
             source_medium=source_medium,
             landing_page=landing_page,
             service_interest=service_interest,
-            status=LeadStatus.NEW,
-            score=LeadScore.UNSCORED,
-            metadata=metadata or {},
+            status=LeadStatus.NEW.value,
+            score=LeadScore.UNSCORED.value,
+            lead_metadata=metadata or {},
         )
 
         self.db.add(lead)
@@ -148,7 +148,7 @@ class LeadService:
             if service_interest:
                 existing.service_interest = service_interest
             if metadata:
-                existing.metadata = {**existing.metadata, **metadata}
+                existing.lead_metadata = {**(existing.lead_metadata or {}), **metadata}
 
             existing.updated_at = datetime.utcnow()
             await self.db.flush()
@@ -233,7 +233,7 @@ class LeadService:
         if not lead:
             return None
 
-        lead.score = score
+        lead.score = score.value if isinstance(score, LeadScore) else score
         if score_value is not None:
             lead.score_value = score_value
 
@@ -251,7 +251,7 @@ class LeadService:
         if not lead:
             return None
 
-        lead.status = status
+        lead.status = status.value if isinstance(status, LeadStatus) else status
         lead.updated_at = datetime.utcnow()
         await self.db.flush()
         return lead
@@ -267,9 +267,9 @@ class LeadService:
         if not lead:
             return None
 
-        lead.appointment_scheduled = appointment_time
-        lead.appointment_type = appointment_type
-        lead.status = LeadStatus.APPOINTMENT_BOOKED
+        lead.appointment_at = appointment_time
+        lead.appointment_notes = appointment_type
+        lead.status = LeadStatus.APPOINTMENT_BOOKED.value
         lead.updated_at = datetime.utcnow()
 
         await self.db.flush()
@@ -285,9 +285,9 @@ class LeadService:
         if not lead:
             return None
 
-        lead.assigned_to = assigned_to
+        lead.handed_off_to = assigned_to
         lead.handed_off_at = datetime.utcnow()
-        lead.status = LeadStatus.HANDED_OFF
+        lead.status = LeadStatus.HANDED_OFF.value
         lead.updated_at = datetime.utcnow()
 
         await self.db.flush()
@@ -304,9 +304,9 @@ class LeadService:
         if not lead:
             return None
 
-        lead.external_crm_id = crm_id
+        lead.crm_contact_id = crm_id
         if contact_id:
-            lead.external_contact_id = contact_id
+            lead.crm_contact_id = contact_id
 
         await self.db.flush()
         return lead
@@ -323,7 +323,7 @@ class LeadService:
             .where(
                 and_(
                     Lead.client_id == client_id,
-                    Lead.status == status,
+                    Lead.status == (status.value if isinstance(status, LeadStatus) else status),
                     Lead.deleted_at.is_(None),
                 )
             )
@@ -339,8 +339,8 @@ class LeadService:
             .where(
                 and_(
                     Lead.client_id == client_id,
-                    Lead.score == LeadScore.HOT,
-                    Lead.status.not_in([LeadStatus.CLOSED_WON, LeadStatus.CLOSED_LOST]),
+                    Lead.score == LeadScore.HOT.value,
+                    Lead.status.not_in([LeadStatus.CLOSED_WON.value, LeadStatus.CLOSED_LOST.value]),
                     Lead.deleted_at.is_(None),
                 )
             )

@@ -2,19 +2,23 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Client, User, DashboardStats } from '../types';
+import type { Client, DashboardStats } from '../types';
+import type { AuthUser } from '../api/auth';
 
 // =============================================================================
 // Auth Store
 // =============================================================================
 
 interface AuthState {
-  user: User | null;
-  token: string | null;
-  apiKey: string | null;
+  user: AuthUser | null;
+  accessToken: string | null;
+  refreshToken: string | null;
   isAuthenticated: boolean;
-  setAuth: (user: User, token: string) => void;
-  setApiKey: (apiKey: string) => void;
+  isLoading: boolean;
+  setAuth: (user: AuthUser, accessToken: string, refreshToken: string) => void;
+  setUser: (user: AuthUser) => void;
+  setTokens: (accessToken: string, refreshToken: string) => void;
+  setLoading: (loading: boolean) => void;
   logout: () => void;
 }
 
@@ -22,26 +26,48 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
       user: null,
-      token: null,
-      apiKey: null,
+      accessToken: null,
+      refreshToken: null,
       isAuthenticated: false,
-      setAuth: (user, token) => {
-        localStorage.setItem('auth_token', token);
-        set({ user, token, isAuthenticated: true });
+      isLoading: true,
+      setAuth: (user, accessToken, refreshToken) => {
+        localStorage.setItem('access_token', accessToken);
+        localStorage.setItem('refresh_token', refreshToken);
+        set({ user, accessToken, refreshToken, isAuthenticated: true, isLoading: false });
       },
-      setApiKey: (apiKey) => {
-        localStorage.setItem('api_key', apiKey);
-        set({ apiKey });
+      setUser: (user) => set({ user }),
+      setTokens: (accessToken, refreshToken) => {
+        localStorage.setItem('access_token', accessToken);
+        localStorage.setItem('refresh_token', refreshToken);
+        set({ accessToken, refreshToken });
       },
+      setLoading: (isLoading) => set({ isLoading }),
       logout: () => {
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('api_key');
-        set({ user: null, token: null, apiKey: null, isAuthenticated: false });
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('auth-storage');
+        localStorage.removeItem('client-storage');
+        set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false, isLoading: false });
       },
     }),
     {
       name: 'auth-storage',
-      partialize: (state) => ({ user: state.user, token: state.token, apiKey: state.apiKey }),
+      partialize: (state) => ({ 
+        user: state.user, 
+        accessToken: state.accessToken,
+        refreshToken: state.refreshToken,
+        isAuthenticated: state.isAuthenticated,
+      }),
+      onRehydrateStorage: () => (state) => {
+        // Check if tokens are still in localStorage (they persist separately)
+        const accessToken = localStorage.getItem('access_token');
+        if (state && accessToken) {
+          state.isLoading = false;
+        } else if (state) {
+          state.isLoading = false;
+          state.isAuthenticated = false;
+        }
+      },
     }
   )
 );

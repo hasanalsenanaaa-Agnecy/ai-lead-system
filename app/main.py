@@ -12,7 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api import webhooks
-from app.api.routes import clients, conversations, health, leads, knowledge, dashboard, escalations
+from app.api.routes import auth, clients, conversations, health, leads, knowledge, dashboard, escalations
+from app.core.rate_limit import RateLimitMiddleware
 from app.core.config import settings
 from app.db.session import close_db, init_db
 
@@ -52,8 +53,8 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup
     logger.info("Starting AI Lead Response System", env=settings.app_env)
-    await init_db()
-    logger.info("Database initialized")
+    # await init_db()
+    # logger.info("Database initialized")
 
     yield
 
@@ -81,6 +82,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add rate limiting middleware
+app.add_middleware(RateLimitMiddleware)
 
 
 # =============================================================================
@@ -149,6 +153,7 @@ async def log_requests(request: Request, call_next):
 # =============================================================================
 
 app.include_router(health.router)
+app.include_router(auth.router, prefix="/api/v1")
 app.include_router(webhooks.router)
 app.include_router(leads.router)
 app.include_router(conversations.router)
