@@ -25,7 +25,7 @@ from app.services.client_service import ClientService
 from app.services.conversation_service import ConversationService
 from app.services.lead_service import LeadService
 from app.services.knowledge_service import KnowledgeService
-from app.integrations.twilio_service import get_twilio_service
+from app.integrations.whatsapp_service import get_whatsapp_service
 from app.integrations.email_service import get_email_service
 from app.integrations.calendar_service import get_calendar_service
 from app.integrations.hubspot_service import get_hubspot_service
@@ -46,7 +46,7 @@ class ConversationOrchestrator:
         self.client_service = ClientService(db)
         self.knowledge_service = KnowledgeService(db)
         self.router = RouterAgent()
-        self.twilio = get_twilio_service()
+        self.whatsapp = get_whatsapp_service()
         self.email_service = get_email_service()
 
     async def process_and_respond(
@@ -225,9 +225,9 @@ class ConversationOrchestrator:
                 metadata={"type": "missed_call_followup"},
             )
 
-            # Send via SMS/WhatsApp
+            # Send via WhatsApp
             await self._send_to_channel(
-                channel=ChannelType.SMS,
+                channel=ChannelType.WHATSAPP,
                 recipient=phone,
                 message=message,
                 client=client,
@@ -517,18 +517,18 @@ class ConversationOrchestrator:
         except Exception as e:
             logger.error("Failed to send hot lead email", error=str(e))
 
-        # Send SMS alert to client for immediate action
+        # Send WhatsApp alert to client for immediate action
         try:
             client_config = await self.client_service.get_client_config(client.id)
-            alert_phone = client_config.get("hot_lead_sms_number")
+            alert_phone = client_config.get("hot_lead_alert_phone")
             
             if alert_phone:
-                await self.twilio.send_sms(
+                await self.whatsapp.send_message(
                     to=alert_phone,
-                    body=f"🔥 HOT LEAD: {lead.name or 'Unknown'}\nPhone: {lead.phone or 'N/A'}\nInterest: {qual_data.get('service_interest', 'N/A')}\nUrgency: {qual_data.get('urgency', 'N/A')}\n\nCall them NOW!",
+                    text=f"🔥 HOT LEAD: {lead.name or 'Unknown'}\nPhone: {lead.phone or 'N/A'}\nInterest: {qual_data.get('service_interest', 'N/A')}\nUrgency: {qual_data.get('urgency', 'N/A')}\n\nCall them NOW!",
                 )
         except Exception as e:
-            logger.error("Failed to send hot lead SMS", error=str(e))
+            logger.error("Failed to send hot lead WhatsApp alert", error=str(e))
 
         # Sync to CRM
         try:
@@ -648,25 +648,10 @@ class ConversationOrchestrator:
         try:
             channel_str = channel.value if isinstance(channel, ChannelType) else channel
             
-            if channel_str == ChannelType.SMS.value and settings.enable_sms:
-                # Get client's Twilio number if configured
-                client_config = await self.client_service.get_client_config(client.id)
-                from_number = client_config.get("twilio_phone_number")
-                
-                await self.twilio.send_sms(
+            if channel_str == ChannelType.WHATSAPP.value and settings.enable_whatsapp:
+                await self.whatsapp.send_message(
                     to=recipient,
-                    body=message,
-                    from_number=from_number,
-                )
-                
-            elif channel_str == ChannelType.WHATSAPP.value and settings.enable_whatsapp:
-                client_config = await self.client_service.get_client_config(client.id)
-                from_number = client_config.get("twilio_whatsapp_number")
-                
-                await self.twilio.send_whatsapp(
-                    to=recipient,
-                    body=message,
-                    from_number=from_number,
+                    text=message,
                 )
                 
             elif channel_str in [ChannelType.WEB_FORM.value, ChannelType.LIVE_CHAT.value]:

@@ -1,6 +1,6 @@
 # AI Lead Response System — Project Status
 
-> **Last Updated:** February 18, 2026  
+> **Last Updated:** February 19, 2026  
 > **Version:** 1.0.0-beta  
 > **Stack:** Python 3.11 · FastAPI · React 18 · PostgreSQL (Supabase) · Claude AI
 
@@ -27,15 +27,15 @@ The system is a **multi-tenant AI-powered lead qualification platform**. A singl
 
 The system receives inbound leads from five different channels via webhook endpoints:
 
-| Endpoint                          | Channel          | How It Works                                                                                                          |
-| --------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `POST /webhooks/web-form`         | Web forms        | Receives JSON with name, email, phone, message. Creates lead + conversation. Queues AI response as a background task. |
-| `POST /webhooks/sms/inbound`      | SMS              | Receives Twilio form-data. Finds client by phone number. Creates/finds lead. Queues AI response.                      |
-| `POST /webhooks/whatsapp/inbound` | WhatsApp         | Receives Twilio WhatsApp payload. Strips `whatsapp:` prefix. Creates/finds lead. Queues AI response.                  |
-| `POST /webhooks/live-chat`        | Live chat widget | Receives JSON with session_id, visitor info, message. Manages conversations by session. Queues AI response.           |
-| `POST /webhooks/missed-call`      | Missed calls     | Receives caller phone + client_id. Creates lead. Sends automated follow-up SMS.                                       |
+| Endpoint                     | Channel           | How It Works                                                                                                          |
+| ---------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `POST /webhooks/web-form`    | Web forms         | Receives JSON with name, email, phone, message. Creates lead + conversation. Queues AI response as a background task. |
+| `GET /webhooks/whatsapp`     | WhatsApp (verify) | Handles Meta webhook verification challenge (hub.mode, hub.verify_token, hub.challenge).                              |
+| `POST /webhooks/whatsapp`    | WhatsApp          | Receives Meta Cloud API JSON payload. Verifies X-Hub-Signature-256. Extracts messages from entry[].changes[].value.   |
+| `POST /webhooks/live-chat`   | Live chat widget  | Receives JSON with session_id, visitor info, message. Manages conversations by session. Queues AI response.           |
+| `POST /webhooks/missed-call` | Missed calls      | Receives caller phone + client_id. Creates lead. Sends automated WhatsApp follow-up.                                  |
 
-All webhooks include Twilio signature verification in production mode. All use `BackgroundTasks` to process AI responses asynchronously.
+WhatsApp webhooks use Meta X-Hub-Signature-256 verification in production mode. All use `BackgroundTasks` to process AI responses asynchronously.
 
 #### AI Conversation Engine (Fully Coded)
 
@@ -57,7 +57,7 @@ The core AI flow is complete end-to-end in code:
    - Updates lead qualification data (service interest, urgency, budget, location, etc.)
    - Tracks token usage per client
    - Handles post-response actions (escalate, transfer hot lead, book appointment, nurture, end conversation)
-   - Sends response to the appropriate channel (SMS, WhatsApp, email, or no-op for web)
+   - Sends response to the appropriate channel (WhatsApp, email, or no-op for web)
    - Falls back with a friendly error message + auto-escalation if AI fails
 
 #### Lead Management (Fully Coded)
@@ -94,7 +94,7 @@ The core AI flow is complete end-to-end in code:
 - Chunk deduplication via SHA-256 content hashing
 - Clear and delete knowledge bases
 
-> **⚠️ Known Issue:** The `embedding` column was added as `TEXT` type. pgvector's `<=>` operator requires `vector(1536)` type. Semantic search SQL will fail at runtime until the column type is corrected and the `vector` extension is enabled on Supabase.
+> **✅ Resolved:** The `embedding` column has been converted to `vector(1536)` type. The `vector` extension is enabled. IVFFlat cosine index is in place. Semantic search is operational.
 
 #### Client / Tenant Management (Fully Coded)
 
@@ -161,9 +161,8 @@ The core AI flow is complete end-to-end in code:
 | Integration          | Service                         | Code State                                                                                                                        | Configured in .env |
 | -------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
 | **AI Qualification** | Anthropic Claude                | ✅ Full implementation (465 lines)                                                                                                | ✅ Yes             |
-| **AI Embeddings**    | OpenAI `text-embedding-3-small` | ✅ Full implementation via httpx                                                                                                  | ❌ No key set      |
-| **SMS**              | Twilio SMS API                  | ✅ Full implementation (482 lines) — send, batch, status callbacks                                                                | ❌ Not configured  |
-| **WhatsApp**         | Twilio WhatsApp API             | ✅ Full implementation — send, templates                                                                                          | ❌ Not configured  |
+| **AI Embeddings**    | OpenAI `text-embedding-3-small` | ✅ Full implementation via httpx                                                                                                  | ✅ Yes             |
+| **WhatsApp**         | Meta WhatsApp Cloud API         | ✅ Full implementation — send text, templates, media, mark-as-read, webhook verification                                          | ❌ Not configured  |
 | **Email**            | SendGrid API + SMTP fallback    | ✅ Full implementation (599 lines) — hot lead alerts, escalation alerts, appointment confirmations, daily reports, HTML templates | ❌ Not configured  |
 | **Calendar**         | Cal.com API                     | ✅ Full implementation (463 lines) — availability, booking, cancel, reschedule                                                    | ❌ Not configured  |
 | **CRM**              | HubSpot API                     | ✅ Full implementation (707 lines) — contacts, deals, activities, lead scoring sync, pipeline management                          | ❌ Not configured  |
@@ -194,7 +193,7 @@ All 8 pages are fully implemented (no more "Coming Soon" stubs):
 The `worker.py` (660 lines) defines:
 
 - `process_ai_response` — async AI response generation
-- `send_message_sms` / `send_message_whatsapp` / `send_message_email` — channel delivery
+- `send_message_whatsapp` / `send_message_email` — channel delivery
 - `sync_lead_to_crm` — HubSpot sync
 - `send_daily_summaries` — daily email reports per client
 - `cleanup_old_data` — archive old conversations/sessions
@@ -224,25 +223,25 @@ Beat schedule configured for daily summaries, daily cleanup, and 5-minute CRM sy
 
 ### 1.7 What's NOT Working / Missing
 
-| Item                        | Details                                                                                                                                         |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **pgvector**                | `embedding` column is `TEXT` type — needs `vector(1536)`. The `vector` extension may not be enabled on Supabase. Semantic search SQL will fail. |
-| **Redis / Celery**          | Not configured. Background tasks fall back to `BackgroundTasks` (in-process, no retry, no persistence).                                         |
-| **No Alembic migrations**   | Tables were created via raw SQL. The `alembic/versions/` directory is empty. No migration history.                                              |
-| **init_db() commented out** | In `main.py`, the `await init_db()` call is commented out in the lifespan. DB tables are assumed to exist.                                      |
-| **No tests**                | `tests/` directory contains only an empty `__init__.py`. Zero test coverage.                                                                    |
-| **No CI/CD**                | No GitHub Actions, no deployment pipeline.                                                                                                      |
-| **No monitoring**           | Sentry DSN not set. No Prometheus/Grafana. No uptime monitoring.                                                                                |
-| **Email not configured**    | No SendGrid key, no SMTP. Escalation/hot-lead email alerts won't send.                                                                          |
-| **Twilio not configured**   | SMS and WhatsApp delivery is a no-op (returns `{"status": "skipped"}`).                                                                         |
-| **OpenAI not configured**   | Embedding generation will fail. RAG search broken.                                                                                              |
-| **HubSpot not configured**  | CRM sync silently skips.                                                                                                                        |
-| **Cal.com not configured**  | Appointment booking silently skips.                                                                                                             |
-| **Frontend not connected**  | The React app needs `VITE_API_URL` env var and a running backend to function. CORS needs the frontend origin.                                   |
-| **No SSL/TLS**              | No HTTPS configuration for production.                                                                                                          |
-| **No web-chat widget**      | The `/webhooks/live-chat` endpoint exists, but there's no embeddable JavaScript widget for client websites.                                     |
-| **No real-time**            | No WebSocket or SSE. The frontend polls for data; live chat has no push delivery.                                                               |
-| **No file uploads**         | Document ingestion accepts text only. No PDF/DOCX parsing.                                                                                      |
+| Item                           | Details                                                                                                     |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| ~~**pgvector**~~               | ✅ FIXED — `vector` extension enabled, column is `vector(1536)`, IVFFlat cosine index created.              |
+| **Redis / Celery**             | Not configured. Background tasks fall back to `BackgroundTasks` (in-process, no retry, no persistence).     |
+| ~~**No Alembic migrations**~~  | ✅ FIXED — 2 migrations applied, `alembic check` clean.                                                     |
+| **init_db() commented out**    | In `main.py`, the `await init_db()` call is commented out in the lifespan. DB tables are assumed to exist.  |
+| **No tests**                   | `tests/` directory contains only an empty `__init__.py`. Zero test coverage.                                |
+| **No CI/CD**                   | No GitHub Actions, no deployment pipeline.                                                                  |
+| **No monitoring**              | Sentry DSN not set. No Prometheus/Grafana. No uptime monitoring.                                            |
+| **Email not configured**       | No SendGrid key, no SMTP. Escalation/hot-lead email alerts won't send.                                      |
+| **WhatsApp not configured**    | Meta WhatsApp Cloud API code complete (replaced Twilio). Tokens not yet set in `.env`.                      |
+| ~~**OpenAI not configured**~~  | ✅ FIXED — `OPENAI_API_KEY` configured in `.env`. Embeddings functional.                                    |
+| **HubSpot not configured**     | CRM sync silently skips.                                                                                    |
+| **Cal.com not configured**     | Appointment booking silently skips.                                                                         |
+| ~~**Frontend not connected**~~ | ✅ FIXED — CORS configured for dev (`localhost:3000,5173`). `VITE_API_URL` set.                             |
+| **No SSL/TLS**                 | No HTTPS configuration for production.                                                                      |
+| **No web-chat widget**         | The `/webhooks/live-chat` endpoint exists, but there's no embeddable JavaScript widget for client websites. |
+| **No real-time**               | No WebSocket or SSE. The frontend polls for data; live chat has no push delivery.                           |
+| **No file uploads**            | Document ingestion accepts text only. No PDF/DOCX parsing.                                                  |
 
 ---
 
@@ -252,60 +251,59 @@ These are listed in priority order. Each must be completed before going live.
 
 ### 🔴 Priority 1: Critical (Cannot Go Live Without)
 
-<!-- #### 2.1 Fix pgvector for Semantic Search
+#### 2.1 Fix pgvector for Semantic Search ✅
 
 ```
-What: The embedding column is TEXT. It needs to be vector(1536).
-Why: The entire RAG pipeline — the AI's ability to answer questions from your
-     client's knowledge base — depends on this.
-How: Enable the vector extension on Supabase and alter the column type.
+DONE: pgvector extension enabled. embedding column converted to vector(1536).
+IVFFlat cosine index created. Semantic search operational.
 ```
 
-#### 2.2 Configure OpenAI API Key
+#### 2.2 Configure OpenAI API Key ✅
 
 ```
-What: Add OPENAI_API_KEY to .env
-Why: Without it, embedding generation fails, knowledge base ingestion fails,
-     and the AI can't search the knowledge base for answers.
+DONE: OPENAI_API_KEY set in .env. Embedding generation via
+text-embedding-3-small is functional.
 ```
 
-#### 2.3 Set Up Alembic Migrations
+#### 2.3 Set Up Alembic Migrations ✅
 
 ```
-What: Generate an initial migration from current models. Run it. Set up
-     migration commands in deploy pipeline.
-Why: You cannot safely change the database schema without migrations. Any
-     future feature (new column, new table, index) needs Alembic.
-How: alembic revision --autogenerate -m "initial", then alembic upgrade head. -->
+DONE: 2 migrations created and applied:
+  - 010846f01f3e: baseline existing schema
+  - 68faad5cf8bf: add missing indexes and columns (head)
+alembic check returns clean. Migration workflow operational.
 ```
 
-#### 2.4 Configure Twilio (SMS + WhatsApp)
+#### 2.4 Configure Meta WhatsApp Cloud API
 
 ```
-What: Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER,
-     TWILIO_WHATSAPP_NUMBER to .env. Set up Twilio webhook URLs pointing
-     to /webhooks/sms/inbound and /webhooks/whatsapp/inbound.
-Why: Without this, the AI can respond but the response never reaches the
-     lead. It stays in the database.
+What: Add META_WHATSAPP_TOKEN, META_WHATSAPP_PHONE_NUMBER_ID,
+      META_APP_SECRET, META_WEBHOOK_VERIFY_TOKEN to .env. In the Meta
+      Developer Dashboard, set the webhook URL to /webhooks/whatsapp
+      and subscribe to the "messages" webhook field.
+Why:  Without this, the AI can respond but the response never reaches the
+      lead via WhatsApp. It stays in the database.
+Note: Code is fully rewritten for Meta Cloud API (replaced Twilio).
+      Only needs env vars + Meta Dashboard configuration.
 ```
 
 #### 2.5 Configure Email (SendGrid or SMTP)
 
 ```
 What: Add SENDGRID_API_KEY or SMTP_HOST/SMTP_USER/SMTP_PASSWORD to .env.
-Why: Hot lead alerts, escalation notifications, and appointment confirmations
-     all send email. Your client's team won't know about urgent leads.
+Why:  Hot lead alerts, escalation notifications, and appointment confirmations
+      all send email. Your client's team won't know about urgent leads.
 ```
 
 #### 2.6 Deploy Backend to Production Host
 
 ```
 What: Deploy to Railway, Render, Fly.io, AWS, or any cloud provider.
-     Set up HTTPS (SSL/TLS). Point a domain to it.
-Why: Currently only runs on localhost:8000. Not accessible to Twilio
-     webhooks or external systems.
+      Set up HTTPS (SSL/TLS). Point a domain to it.
+Why:  Currently only runs on localhost:8000. Not accessible to Meta
+      webhooks or external systems.
 Requirements:
-  - HTTPS (required by Twilio)
+  - HTTPS (required by Meta WhatsApp webhooks)
   - Domain name
   - Environment variables set on host
   - Health check monitoring
@@ -315,29 +313,27 @@ Requirements:
 
 ```
 What: Build the React app and deploy to Vercel, Netlify, or serve via Nginx.
-     Set VITE_API_URL to the production backend URL. Add the frontend
-     origin to ALLOWED_ORIGINS in backend .env.
-Why: Your client needs a dashboard to see leads, escalations, and analytics.
+      Set VITE_API_URL to the production backend URL. Add the frontend
+      origin to ALLOWED_ORIGINS in backend .env.
+Why:  Your client needs a dashboard to see leads, escalations, and analytics.
 ```
 
-#### 2.8 Create First Client and User
+#### 2.8 Create First Client and User ✅
 
 ```
-What: Use the API or a seed script to:
-  1. Create a Client record (name, slug, industry, timezone)
-  2. Store the returned API key securely
-  3. Register an admin User for that client
-  4. Activate the client
-Why: The system is multi-tenant. Nothing works without a client record.
-     The API key is needed for webhook authentication.
+DONE: Seed script created (scripts/seed_client.py).
+Client "Sunset Dental" created (id=2f96d096...), status=active.
+Admin user admin@sunsetdental.com created, role=admin, verified=true.
+API key generated and stored.
 ```
 
-#### 2.9 Configure CORS for Production
+#### 2.9 Configure CORS for Production ✅
 
 ```
-What: Set ALLOWED_ORIGINS in .env to the actual frontend domain
-     (e.g., https://dashboard.yourdomain.com). Remove localhost.
-Why: Without correct CORS, the frontend cannot call the backend.
+DONE: ALLOWED_ORIGINS is now configurable via .env (comma-separated).
+Development defaults to http://localhost:3000,http://localhost:5173.
+For production, set ALLOWED_ORIGINS=https://dashboard.yourdomain.com in .env.
+CORS origins are logged at startup for easy verification.
 ```
 
 ### 🟡 Priority 2: Important (Go Live Is Risky Without)
@@ -345,65 +341,79 @@ Why: Without correct CORS, the frontend cannot call the backend.
 #### 2.10 Set Up Redis + Celery Worker
 
 ```
+
 What: Provision a Redis instance (Redis Cloud free tier, or Railway Redis).
-     Set REDIS_URL, CELERY_BROKER_URL, CELERY_RESULT_BACKEND in .env.
-     Run a Celery worker process alongside the API.
+Set REDIS_URL, CELERY_BROKER_URL, CELERY_RESULT_BACKEND in .env.
+Run a Celery worker process alongside the API.
 Why: Without Celery, AI responses run in-process using FastAPI BackgroundTasks.
-     This means: no retry on failure, no task persistence across restarts,
-     and heavy AI calls block the event loop under load.
+This means: no retry on failure, no task persistence across restarts,
+and heavy AI calls block the event loop under load.
+
 ```
 
 #### 2.11 Enable Sentry Error Tracking
 
 ```
+
 What: Create a Sentry project. Add SENTRY_DSN to .env.
 Why: In production, you need to know when errors happen. Without Sentry,
-     errors are only in server logs (if you're even looking).
+errors are only in server logs (if you're even looking).
+
 ```
 
 #### 2.12 Write Seed Data / Onboarding Script
 
 ```
+
 What: A script that creates a client, sets up their knowledge base with
-     sample FAQs, configures qualification questions, and returns the
-     API key and webhook URLs.
+sample FAQs, configures qualification questions, and returns the
+API key and webhook URLs.
 Why: Onboarding a new client should take minutes, not hours of manual
-     API calls.
+API calls.
+
 ```
 
 #### 2.13 Webhook Embeddable Widget (Live Chat)
 
 ```
+
 What: A small JavaScript snippet (<script> tag) that clients paste into
-     their website. It opens a chat widget and sends messages to
-     POST /webhooks/live-chat.
+their website. It opens a chat widget and sends messages to
+POST /webhooks/live-chat.
 Why: SMS and WhatsApp require the lead to initiate. A website widget
-     captures web visitors directly.
+captures web visitors directly.
+
 ```
 
 #### 2.14 Write Core Tests
 
 ```
+
 What: At minimum:
-  - Test webhook endpoints return correct responses
-  - Test lead create/update/dedup logic
-  - Test conversation creation and message adding
-  - Test AI response parsing (mock the Anthropic call)
-  - Test client API key generation/verification
-  - Test auth registration/login flow
-Why: Without tests, any code change risks breaking production.
-Target: 70%+ coverage on services/, agents/, and webhooks.
+
+- Test webhook endpoints return correct responses
+- Test lead create/update/dedup logic
+- Test conversation creation and message adding
+- Test AI response parsing (mock the Anthropic call)
+- Test client API key generation/verification
+- Test auth registration/login flow
+  Why: Without tests, any code change risks breaking production.
+  Target: 70%+ coverage on services/, agents/, and webhooks.
+
 ```
 
 #### 2.15 Set Up CI/CD Pipeline
 
 ```
+
 What: GitHub Actions workflow that:
-  1. Runs tests on push
-  2. Checks TypeScript compilation
-  3. Builds Docker image
-  4. Deploys to staging/production
-Why: Manual deployments are error-prone and slow.
+
+1. Runs tests on push
+2. Checks TypeScript compilation
+3. Builds Docker image
+4. Deploys to staging/production
+   Why: Manual deployments are error-prone and slow.
+
 ```
 
 ### 🟢 Priority 3: Should Do Before Scale
@@ -411,43 +421,53 @@ Why: Manual deployments are error-prone and slow.
 #### 2.16 Configure HubSpot CRM Integration
 
 ```
+
 What: Add HUBSPOT_ACCESS_TOKEN to .env. Map custom properties.
 Why: Clients want leads pushed to their CRM automatically.
 When: After first client is live and requesting it.
+
 ```
 
 #### 2.17 Configure Cal.com Integration
 
 ```
+
 What: Add CALCOM_API_KEY and event type ID. Set up per-client calendar configs.
 Why: The AI can book appointments during conversation — a major feature.
 When: After client sets up their Cal.com account.
+
 ```
 
 #### 2.18 Add WebSocket / SSE for Real-Time
 
 ```
+
 What: Add a WebSocket endpoint for live chat so the frontend and chat widget
-     receive messages instantly instead of polling.
+receive messages instantly instead of polling.
 Why: Current live chat has no push delivery. Responses sit in the DB until
-     the next poll.
+the next poll.
+
 ```
 
 #### 2.19 Add Document Upload (PDF/DOCX)
 
 ```
+
 What: Accept file uploads, extract text (PyPDF2, python-docx), then feed
-     to the existing ingestion pipeline.
+to the existing ingestion pipeline.
 Why: Clients have brochures, FAQs, and service descriptions as files,
-     not raw text.
+not raw text.
+
 ```
 
 #### 2.20 Production Docker Compose / Kubernetes
 
 ```
+
 What: Set up docker-compose.prod.yml with production configs, or Kubernetes
-     manifests for orchestration.
+manifests for orchestration.
 Why: Need to run API + worker + beat scheduler as separate services.
+
 ```
 
 ---===========++++++++++++++++=====+++++++++++======++++======++++=====++++====+====+=+=+=+=====+++++++++++++++=========++++++++++=======++++++++
@@ -460,16 +480,16 @@ Why: Need to run API + worker + beat scheduler as separate services.
 
 _Get one client live and handling real leads._
 
-- [ ] Fix pgvector column type
-- [ ] Configure OpenAI key
-- [ ] Configure Twilio (SMS at minimum)
+- [x] Fix pgvector column type
+- [x] Configure OpenAI key
+- [ ] Configure Meta WhatsApp Cloud API
 - [ ] Configure SendGrid/SMTP
-- [ ] Set up Alembic migrations
+- [x] Set up Alembic migrations
 - [ ] Deploy backend (Railway/Render + custom domain + HTTPS)
 - [ ] Deploy frontend (Vercel/Netlify)
-- [ ] Create first client + admin user
+- [x] Create first client + admin user
 - [ ] Seed initial knowledge base with client's FAQs
-- [ ] Manual end-to-end test: submit web form → AI responds → SMS delivered → lead appears in dashboard
+- [ ] Manual end-to-end test: submit web form → AI responds → WhatsApp delivered → lead appears in dashboard
 
 ### Phase 2: Reliability (Weeks 2–4)
 
@@ -549,19 +569,18 @@ _Become a platform._
 
 ## Summary
 
-| Category                      | Status                                                                             |
-| ----------------------------- | ---------------------------------------------------------------------------------- |
-| **Backend code completeness** | ~95% — all services, routes, integrations fully coded                              |
-| **Frontend completeness**     | 100% — all pages built, 0 TypeScript errors                                        |
-| **Database**                  | Tables exist but no migration history; pgvector needs fixing                       |
-| **AI pipeline**               | Fully coded but untested end-to-end with real messages                             |
-| **Integrations configured**   | 1 of 6 (Anthropic only). Twilio, SendGrid, OpenAI, HubSpot, Cal.com all need keys. |
-| **Deployment**                | Nothing deployed. Runs on localhost only.                                          |
-| **Testing**                   | 0 tests                                                                            |
-| **Monitoring**                | 0 monitoring                                                                       |
-| **Client readiness**          | Not ready — needs deployment, integration config, and first client setup           |
-| **Time to first live lead**   | ~1–2 weeks of focused work on Priority 1 items                                     |
-
+| Category                      | Status                                                                                                |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Backend code completeness** | ~95% — all services, routes, integrations fully coded                                                 |
+| **Frontend completeness**     | 100% — all pages built, 0 TypeScript errors                                                           |
+| **Database**                  | ✅ 13 tables, 42 indexes, pgvector fixed, Alembic migrations operational (2 applied, head clean)      |
+| **AI pipeline**               | Fully coded. Anthropic + OpenAI keys configured. Smoke-tested via web-form webhook.                   |
+| **Integrations configured**   | 2 of 6 (Anthropic + OpenAI). Meta WhatsApp (code ready), SendGrid, HubSpot, Cal.com need keys/config. |
+| **Deployment**                | Nothing deployed. Runs on localhost only.                                                             |
+| **Testing**                   | 0 tests                                                                                               |
+| **Monitoring**                | 0 monitoring                                                                                          |
+| **Client readiness**          | Client + admin user created. Needs deployment + WhatsApp/email config to go live.                     |
+| **Time to first live lead**   | ~3–5 days of focused work on remaining Priority 1 items (deploy + configure WhatsApp + email)         |
 
 FEATURES
 
@@ -845,3 +864,7 @@ Staff edits & sends
 Hybrid automation.
 
 Safer for conservative clients.
+
+```
+
+```

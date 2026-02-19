@@ -284,31 +284,22 @@ def verify_webhook_signature(
     return hmac.compare_digest(expected, signature)
 
 
-def verify_twilio_signature(
-    url: str,
-    params: dict,
+def verify_meta_webhook_signature(
+    payload: bytes,
     signature: str,
-    auth_token: str,
+    app_secret: str,
 ) -> bool:
-    """Verify Twilio webhook signature."""
-    from urllib.parse import urlencode
+    """Verify Meta (WhatsApp) webhook signature (X-Hub-Signature-256)."""
+    if not signature or not signature.startswith("sha256="):
+        return False
     
-    # Build the validation string
-    s = url
-    if params:
-        s += urlencode(sorted(params.items()))
-    
-    # Calculate expected signature
     expected = hmac.new(
-        auth_token.encode(),
-        s.encode(),
-        hashlib.sha1
-    ).digest()
+        app_secret.encode(),
+        payload,
+        hashlib.sha256,
+    ).hexdigest()
     
-    import base64
-    expected_b64 = base64.b64encode(expected).decode()
-    
-    return hmac.compare_digest(expected_b64, signature)
+    return hmac.compare_digest(expected, signature[7:])
 
 
 def verify_stripe_signature(

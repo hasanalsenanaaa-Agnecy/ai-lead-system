@@ -59,7 +59,7 @@ class ClientService:
         return result.scalar_one_or_none()
 
     async def get_by_phone_number(self, phone: str) -> Client | None:
-        """Get client by their Twilio phone number."""
+        """Get client by their business phone number."""
         # Phone numbers are stored in config
         result = await self.db.execute(
             select(Client).where(
@@ -73,16 +73,16 @@ class ClientService:
 
         for client in clients:
             config = client.config or {}
-            if config.get("twilio_phone_number") == phone:
+            if config.get("business_phone_number") == phone:
                 return client
-            if config.get("twilio_numbers", []):
-                if phone in config["twilio_numbers"]:
+            if config.get("phone_numbers", []):
+                if phone in config["phone_numbers"]:
                     return client
 
         return None
 
     async def get_by_whatsapp_number(self, phone: str) -> Client | None:
-        """Get client by their WhatsApp number."""
+        """Get client by their WhatsApp display phone number."""
         result = await self.db.execute(
             select(Client).where(
                 and_(
@@ -100,6 +100,25 @@ class ClientService:
             # Also check without prefix variations
             clean_phone = phone.lstrip("+")
             if config.get("whatsapp_number", "").lstrip("+") == clean_phone:
+                return client
+
+        return None
+
+    async def get_by_whatsapp_phone_number_id(self, phone_number_id: str) -> Client | None:
+        """Get client by their Meta WhatsApp phone_number_id."""
+        result = await self.db.execute(
+            select(Client).where(
+                and_(
+                    Client.status == ClientStatus.ACTIVE,
+                    Client.deleted_at.is_(None),
+                )
+            )
+        )
+        clients = result.scalars().all()
+
+        for client in clients:
+            config = client.config or {}
+            if config.get("whatsapp_phone_number_id") == phone_number_id:
                 return client
 
         return None

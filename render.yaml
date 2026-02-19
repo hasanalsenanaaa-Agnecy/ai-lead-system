@@ -2,6 +2,7 @@ services:
   - type: web
     name: ai-lead-api
     env: python
+    runtime: python-3.11.0
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
@@ -14,6 +15,8 @@ services:
         generateValue: true
       - key: APP_ENV
         value: production
+      - key: PYTHON_VERSION
+        value: 3.11.0
 
 databases:
   - name: ai-leads-db

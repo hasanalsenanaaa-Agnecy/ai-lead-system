@@ -40,11 +40,20 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     api_workers: int = 4
-    allowed_origins: str = "http://localhost:3000"
+
+    # Comma-separated list of allowed origins for CORS.
+    # Development default includes common local dev servers.
+    # In production, set ALLOWED_ORIGINS=https://dashboard.yourdomain.com
+    allowed_origins: str = "http://localhost:3000,http://localhost:5173"
 
     @property
     def cors_origins(self) -> list[str]:
-        return [origin.strip() for origin in self.allowed_origins.split(",")]
+        """Parse ALLOWED_ORIGINS into a list, filtering out empty strings."""
+        return [
+            origin.strip()
+            for origin in self.allowed_origins.split(",")
+            if origin.strip()
+        ]
 
     # -------------------------------------------------------------------------
     # Database
@@ -81,13 +90,13 @@ class Settings(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-small"
 
     # -------------------------------------------------------------------------
-    # Twilio
+    # Meta WhatsApp Cloud API
     # -------------------------------------------------------------------------
-    twilio_account_sid: str | None = None
-    twilio_auth_token: SecretStr | None = None
-    twilio_phone_number: str | None = None
-    twilio_whatsapp_number: str | None = None
-    twilio_webhook_url: str | None = None
+    meta_whatsapp_token: SecretStr | None = None
+    meta_whatsapp_phone_number_id: str | None = None
+    meta_whatsapp_business_account_id: str | None = None
+    meta_app_secret: SecretStr | None = None
+    meta_webhook_verify_token: str | None = None
 
     # -------------------------------------------------------------------------
     # Cal.com (Calendar)
@@ -138,7 +147,6 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     enable_voice_ai: bool = False
     enable_whatsapp: bool = True
-    enable_sms: bool = True
     enable_web_chat: bool = True
     enable_prompt_caching: bool = True
 

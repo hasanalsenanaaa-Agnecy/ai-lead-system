@@ -148,56 +148,36 @@ def generate_greeting(
 # Message Delivery Tasks
 # ============================================================================
 
-@celery_app.task(bind=True, base=AsyncTask, name="app.worker.send_message_sms")
-def send_message_sms(
-    self,
-    to: str,
-    body: str,
-    from_number: str | None = None,
-) -> dict[str, Any]:
-    """Send SMS message via Twilio."""
-    async def _send():
-        from app.integrations.twilio_service import get_twilio_service
-        
-        twilio = get_twilio_service()
-        result = await twilio.send_sms(
-            to=to,
-            body=body,
-            from_number=from_number,
-        )
-        
-        return {
-            "status": "sent",
-            "message_sid": result.get("sid"),
-            "to": to,
-        }
-    
-    return self.run_async(_send())
-
-
 @celery_app.task(bind=True, base=AsyncTask, name="app.worker.send_message_whatsapp")
 def send_message_whatsapp(
     self,
     to: str,
     body: str,
-    from_number: str | None = None,
     media_url: str | None = None,
 ) -> dict[str, Any]:
-    """Send WhatsApp message via Twilio."""
+    """Send WhatsApp message via Meta Cloud API."""
     async def _send():
-        from app.integrations.twilio_service import get_twilio_service
+        from app.integrations.whatsapp_service import get_whatsapp_service
         
-        twilio = get_twilio_service()
-        result = await twilio.send_whatsapp(
-            to=to,
-            body=body,
-            from_number=from_number,
-            media_url=media_url,
-        )
+        wa = get_whatsapp_service()
+
+        if media_url:
+            result = await wa.send_media(
+                to=to,
+                media_type="image",
+                media_url=media_url,
+                caption=body,
+            )
+        else:
+            result = await wa.send_message(to=to, text=body)
         
+        wamid = None
+        if result.get("messages"):
+            wamid = result["messages"][0].get("id")
+
         return {
             "status": "sent",
-            "message_sid": result.get("sid"),
+            "message_id": wamid,
             "to": to,
         }
     
@@ -272,20 +252,24 @@ def send_escalation_alert(
     return self.run_async(_send())
 
 
-@celery_app.task(bind=True, base=AsyncTask, name="app.worker.send_sms_alert")
-def send_sms_alert(
+@celery_app.task(bind=True, base=AsyncTask, name="app.worker.send_whatsapp_alert")
+def send_whatsapp_alert(
     self,
     to: str,
     message: str,
 ) -> dict[str, Any]:
-    """Send urgent SMS alert (for hot leads)."""
+    """Send urgent WhatsApp alert (for hot leads)."""
     async def _send():
-        from app.integrations.twilio_service import get_twilio_service
+        from app.integrations.whatsapp_service import get_whatsapp_service
         
-        twilio = get_twilio_service()
-        result = await twilio.send_sms(to=to, body=message)
+        wa = get_whatsapp_service()
+        result = await wa.send_message(to=to, text=message)
         
-        return {"status": "sent", "sid": result.get("sid")}
+        wamid = None
+        if result.get("messages"):
+            wamid = result["messages"][0].get("id")
+
+        return {"status": "sent", "message_id": wamid}
     
     return self.run_async(_send())
 

@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +19,7 @@ from app.db.models import ChannelType, LeadStatus
 from app.db.session import get_db_session
 from app.services.lead_service import LeadService
 from app.services.conversation_service import ConversationService
+from app.integrations.whatsapp_service import get_whatsapp_service
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -42,29 +44,6 @@ class WebFormLead(BaseModel):
     source_medium: str | None = None
     landing_page: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class SMSInbound(BaseModel):
-    """Inbound SMS message (Twilio format)."""
-
-    From: str = Field(..., alias="From")
-    To: str = Field(..., alias="To")
-    Body: str = Field(..., alias="Body")
-    MessageSid: str = Field(..., alias="MessageSid")
-    AccountSid: str = Field(..., alias="AccountSid")
-    NumMedia: str = Field(default="0", alias="NumMedia")
-
-
-class WhatsAppInbound(BaseModel):
-    """Inbound WhatsApp message (Twilio format)."""
-
-    From: str = Field(..., alias="From")
-    To: str = Field(..., alias="To")
-    Body: str = Field(..., alias="Body")
-    MessageSid: str = Field(..., alias="MessageSid")
-    AccountSid: str = Field(..., alias="AccountSid")
-    ProfileName: str | None = Field(default=None, alias="ProfileName")
-    WaId: str | None = Field(default=None, alias="WaId")
 
 
 class MissedCallWebhook(BaseModel):
@@ -105,46 +84,9 @@ class WebhookResponse(BaseModel):
     conversation_id: UUID | None = None
 
 
-class TwilioResponse(BaseModel):
-    """Response format for Twilio webhooks."""
-
-    # Twilio expects TwiML, but for API responses we use this
-    success: bool
-    message_sid: str | None = None
-
-
 # =============================================================================
 # Security Helpers
 # =============================================================================
-
-
-def verify_twilio_signature(
-    request: Request,
-    signature: str,
-    url: str,
-    params: dict[str, Any],
-) -> bool:
-    """Verify Twilio webhook signature."""
-    if not settings.twilio_auth_token:
-        return False
-
-    # Build the string to sign
-    sorted_params = sorted(params.items())
-    param_string = "".join(f"{k}{v}" for k, v in sorted_params)
-    full_string = url + param_string
-
-    # Calculate expected signature
-    expected = hmac.new(
-        settings.twilio_auth_token.get_secret_value().encode(),
-        full_string.encode(),
-        hashlib.sha1,
-    ).digest()
-
-    import base64
-
-    expected_b64 = base64.b64encode(expected).decode()
-
-    return hmac.compare_digest(signature, expected_b64)
 
 
 async def verify_client_api_key(
@@ -232,150 +174,133 @@ async def receive_web_form(
 
 
 # =============================================================================
-# SMS Webhook (Twilio)
+# WhatsApp Webhook (Meta Cloud API)
 # =============================================================================
 
 
-@router.post("/sms/inbound")
-async def receive_sms(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db_session),
-):
+@router.get("/whatsapp")
+async def verify_whatsapp_webhook(request: Request):
     """
-    Receive inbound SMS via Twilio webhook.
+    Handle Meta webhook verification challenge (GET).
+    Meta sends: hub.mode, hub.verify_token, hub.challenge
     """
-    # Parse form data
-    form_data = await request.form()
-    data = dict(form_data)
+    mode = request.query_params.get("hub.mode")
+    token = request.query_params.get("hub.verify_token")
+    challenge = request.query_params.get("hub.challenge")
 
-    # Verify Twilio signature in production
-    if settings.is_production:
-        signature = request.headers.get("X-Twilio-Signature", "")
-        url = str(request.url)
-        if not verify_twilio_signature(request, signature, url, data):
-            raise HTTPException(status_code=403, detail="Invalid signature")
+    wa = get_whatsapp_service()
+    result = wa.verify_webhook_challenge(mode, token, challenge)
 
-    sms = SMSInbound(**data)
-    lead_service = LeadService(db)
-    conversation_service = ConversationService(db)
+    if result is not None:
+        return PlainTextResponse(content=result)
 
-    # Find client by Twilio number
-    from app.services.client_service import ClientService
-
-    client_service = ClientService(db)
-    client = await client_service.get_by_phone_number(sms.To)
-
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found for this number")
-
-    # Create or find lead
-    lead = await lead_service.create_or_update_lead(
-        client_id=client.id,
-        phone=sms.From,
-        source_channel=ChannelType.SMS,
-    )
-
-    # Find or create conversation
-    conversation = await conversation_service.get_or_create_active_conversation(
-        client_id=client.id,
-        lead_id=lead.id,
-        channel=ChannelType.SMS,
-    )
-
-    # Add message
-    await conversation_service.add_message(
-        conversation_id=conversation.id,
-        role="lead",
-        content=sms.Body,
-        external_message_id=sms.MessageSid,
-    )
-
-    # Queue AI response
-    background_tasks.add_task(
-        process_ai_response,
-        conversation_id=conversation.id,
-        lead_id=lead.id,
-        client_id=client.id,
-    )
-
-    # Return TwiML empty response (we'll send reply separately)
-    return {"success": True, "message_sid": sms.MessageSid}
+    raise HTTPException(status_code=403, detail="Verification failed")
 
 
-# =============================================================================
-# WhatsApp Webhook (Twilio)
-# =============================================================================
-
-
-@router.post("/whatsapp/inbound")
+@router.post("/whatsapp")
 async def receive_whatsapp(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db_session),
 ):
     """
-    Receive inbound WhatsApp message via Twilio webhook.
+    Receive inbound WhatsApp messages via Meta Cloud API webhook.
+    Payload format: { object: "whatsapp_business_account", entry: [...] }
     """
-    form_data = await request.form()
-    data = dict(form_data)
+    body_bytes = await request.body()
 
     # Verify signature in production
     if settings.is_production:
-        signature = request.headers.get("X-Twilio-Signature", "")
-        url = str(request.url)
-        if not verify_twilio_signature(request, signature, url, data):
+        signature = request.headers.get("X-Hub-Signature-256", "")
+        wa = get_whatsapp_service()
+        if not wa.verify_signature(body_bytes, signature):
             raise HTTPException(status_code=403, detail="Invalid signature")
 
-    wa = WhatsAppInbound(**data)
+    body = await request.json()
+
+    # Meta sometimes sends status updates, not messages
+    if body.get("object") != "whatsapp_business_account":
+        return {"status": "ignored"}
+
+    wa = get_whatsapp_service()
+    incoming_messages = wa.extract_messages(body)
+
+    if not incoming_messages:
+        # Might be a status update (delivered / read) – acknowledge it
+        return {"status": "ok"}
+
     lead_service = LeadService(db)
     conversation_service = ConversationService(db)
 
-    # Extract phone number (remove 'whatsapp:' prefix)
-    from_phone = wa.From.replace("whatsapp:", "")
-    to_phone = wa.To.replace("whatsapp:", "")
-
-    # Find client
     from app.services.client_service import ClientService
-
     client_service = ClientService(db)
-    client = await client_service.get_by_whatsapp_number(to_phone)
 
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+    for msg in incoming_messages:
+        from_phone = msg["from_phone"]
+        message_id = msg["message_id"]
+        text = msg["text"]
+        profile_name = msg["profile_name"]
 
-    # Create or find lead
-    lead = await lead_service.create_or_update_lead(
-        client_id=client.id,
-        phone=from_phone,
-        name=wa.ProfileName,
-        source_channel=ChannelType.WHATSAPP,
-    )
+        if not text:
+            # Skip non-text messages for now (images, stickers, etc.)
+            continue
 
-    # Find or create conversation
-    conversation = await conversation_service.get_or_create_active_conversation(
-        client_id=client.id,
-        lead_id=lead.id,
-        channel=ChannelType.WHATSAPP,
-    )
+        # Find which client owns this WhatsApp number
+        # The phone_number_id receiving this webhook is in the payload
+        # For now, look up by the WhatsApp number in client config
+        phone_number_id = None
+        for entry in body.get("entry", []):
+            for change in entry.get("changes", []):
+                value = change.get("value", {})
+                meta_data = value.get("metadata", {})
+                phone_number_id = meta_data.get("phone_number_id")
+                display_phone = meta_data.get("display_phone_number")
 
-    # Add message
-    await conversation_service.add_message(
-        conversation_id=conversation.id,
-        role="lead",
-        content=wa.Body,
-        external_message_id=wa.MessageSid,
-    )
+        client = None
+        if display_phone:
+            client = await client_service.get_by_whatsapp_number(display_phone)
+        if not client and phone_number_id:
+            client = await client_service.get_by_whatsapp_phone_number_id(phone_number_id)
 
-    # Queue AI response
-    background_tasks.add_task(
-        process_ai_response,
-        conversation_id=conversation.id,
-        lead_id=lead.id,
-        client_id=client.id,
-    )
+        if not client:
+            # Could not match to a client – still acknowledge
+            continue
 
-    return {"success": True, "message_sid": wa.MessageSid}
+        # Create or update lead
+        lead = await lead_service.create_or_update_lead(
+            client_id=client.id,
+            phone=f"+{from_phone}",
+            name=profile_name,
+            source_channel=ChannelType.WHATSAPP,
+        )
+
+        # Find or create conversation
+        conversation = await conversation_service.get_or_create_active_conversation(
+            client_id=client.id,
+            lead_id=lead.id,
+            channel=ChannelType.WHATSAPP,
+        )
+
+        # Add message
+        await conversation_service.add_message(
+            conversation_id=conversation.id,
+            role="lead",
+            content=text,
+            external_message_id=message_id,
+        )
+
+        # Mark as read
+        background_tasks.add_task(_mark_as_read, message_id)
+
+        # Queue AI response
+        background_tasks.add_task(
+            process_ai_response,
+            conversation_id=conversation.id,
+            lead_id=lead.id,
+            client_id=client.id,
+        )
+
+    return {"status": "ok"}
 
 
 # =============================================================================
@@ -449,7 +374,7 @@ async def receive_missed_call(
 ):
     """
     Handle missed call notification.
-    Creates lead and initiates outbound SMS/WhatsApp.
+    Creates lead and initiates outbound WhatsApp follow-up.
     """
     lead_service = LeadService(db)
     conversation_service = ConversationService(db)
@@ -485,6 +410,20 @@ async def receive_missed_call(
         lead_id=lead.id,
         conversation_id=conversation.id,
     )
+
+
+# =============================================================================
+# Background Task Helpers
+# =============================================================================
+
+
+async def _mark_as_read(message_id: str) -> None:
+    """Mark an incoming WhatsApp message as read (blue ticks)."""
+    try:
+        wa = get_whatsapp_service()
+        await wa.mark_as_read(message_id)
+    except Exception:
+        pass  # Non-critical
 
 
 # =============================================================================

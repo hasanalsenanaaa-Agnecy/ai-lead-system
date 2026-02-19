@@ -32,7 +32,6 @@ dependencies = [
     "sentry-sdk[fastapi]>=1.40.0",
     "redis>=5.0.1",
     "celery>=5.3.6",
-    "twilio>=8.13.0",
     "supabase>=2.3.4",
     "pgvector>=0.2.4",
     "numpy>=1.26.4",
