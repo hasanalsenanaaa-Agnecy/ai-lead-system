@@ -433,7 +433,7 @@ class AuthService:
         tokens = create_token_pair(
             user_id=str(user.id),
             client_id=str(user.client_id) if user.client_id else None,
-            role=user.role.value,
+            role=user.role if isinstance(user.role, str) else user.role.value,
             session_id=str(session.id),
             remember_me=session.remember_me,
         )
@@ -700,7 +700,7 @@ class AuthService:
         tokens = create_token_pair(
             user_id=str(user.id),
             client_id=str(user.client_id) if user.client_id else None,
-            role=user.role.value,
+            role=user.role if isinstance(user.role, str) else user.role.value,
             session_id=str(session_id),
             remember_me=remember_me,
         )

@@ -1,8 +1,8 @@
 # AI Lead Response System — Project Status
 
-> **Last Updated:** February 19, 2026  
+> **Last Updated:** February 20, 2026  
 > **Version:** 1.0.0-beta  
-> **Stack:** Python 3.11 · FastAPI · React 18 · PostgreSQL (Supabase) · Claude AI
+> **Stack:** Python 3.11 · FastAPI · React 18 · PostgreSQL · Claude AI
 
 ---
 
@@ -19,7 +19,7 @@ The system is a **multi-tenant AI-powered lead qualification platform**. A singl
 | AI Engine        | Anthropic Claude (Sonnet for qualification, Haiku for routing) | ✅ Code complete, API key configured  |
 | Frontend         | React 18 + TypeScript + Vite + Tailwind                        | ✅ Builds, all pages implemented      |
 | Background Jobs  | Celery + Redis                                                 | ⚠️ Code written, Redis not configured |
-| Containerization | Docker + Docker Compose                                        | ✅ Dockerfile and compose files exist |
+| Deployment       | Render (backend) + Vercel (frontend)                           | ✅ Backend deployed on Render          |
 
 ### 1.2 Backend — What's Wired and Functional
 
@@ -162,7 +162,7 @@ The core AI flow is complete end-to-end in code:
 | -------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
 | **AI Qualification** | Anthropic Claude                | ✅ Full implementation (465 lines)                                                                                                | ✅ Yes             |
 | **AI Embeddings**    | OpenAI `text-embedding-3-small` | ✅ Full implementation via httpx                                                                                                  | ✅ Yes             |
-| **WhatsApp**         | Meta WhatsApp Cloud API         | ✅ Full implementation — send text, templates, media, mark-as-read, webhook verification                                          | ❌ Not configured  |
+| **WhatsApp**         | Meta WhatsApp Cloud API         | ✅ Full implementation — send text, templates, media, mark-as-read, webhook verification                                          | ✅ Configured      |
 | **Email**            | SendGrid API + SMTP fallback    | ✅ Full implementation (599 lines) — hot lead alerts, escalation alerts, appointment confirmations, daily reports, HTML templates | ❌ Not configured  |
 | **Calendar**         | Cal.com API                     | ✅ Full implementation (463 lines) — availability, booking, cancel, reschedule                                                    | ❌ Not configured  |
 | **CRM**              | HubSpot API                     | ✅ Full implementation (707 lines) — contacts, deals, activities, lead scoring sync, pipeline management                          | ❌ Not configured  |
@@ -233,12 +233,12 @@ Beat schedule configured for daily summaries, daily cleanup, and 5-minute CRM sy
 | **No CI/CD**                   | No GitHub Actions, no deployment pipeline.                                                                  |
 | **No monitoring**              | Sentry DSN not set. No Prometheus/Grafana. No uptime monitoring.                                            |
 | **Email not configured**       | No SendGrid key, no SMTP. Escalation/hot-lead email alerts won't send.                                      |
-| **WhatsApp not configured**    | Meta WhatsApp Cloud API code complete (replaced Twilio). Tokens not yet set in `.env`.                      |
+| ~~**WhatsApp not configured**~~| ✅ FIXED — Meta WhatsApp Cloud API tokens configured in `.env`. Code fully rewritten from Twilio.           |
 | ~~**OpenAI not configured**~~  | ✅ FIXED — `OPENAI_API_KEY` configured in `.env`. Embeddings functional.                                    |
 | **HubSpot not configured**     | CRM sync silently skips.                                                                                    |
 | **Cal.com not configured**     | Appointment booking silently skips.                                                                         |
-| ~~**Frontend not connected**~~ | ✅ FIXED — CORS configured for dev (`localhost:3000,5173`). `VITE_API_URL` set.                             |
-| **No SSL/TLS**                 | No HTTPS configuration for production.                                                                      |
+| ~~**Frontend not connected**~~ | ✅ FIXED — CORS configured for dev (`localhost:3000,5173`). `VITE_API_URL` set. Login tested end-to-end.    |
+| ~~**No SSL/TLS**~~             | ✅ FIXED — Backend deployed to Render with HTTPS.                                                           |
 | **No web-chat widget**         | The `/webhooks/live-chat` endpoint exists, but there's no embeddable JavaScript widget for client websites. |
 | **No real-time**               | No WebSocket or SSE. The frontend polls for data; live chat has no push delivery.                           |
 | **No file uploads**            | Document ingestion accepts text only. No PDF/DOCX parsing.                                                  |
@@ -274,17 +274,16 @@ DONE: 2 migrations created and applied:
 alembic check returns clean. Migration workflow operational.
 ```
 
-#### 2.4 Configure Meta WhatsApp Cloud API
+#### 2.4 Configure Meta WhatsApp Cloud API ✅
 
 ```
-What: Add META_WHATSAPP_TOKEN, META_WHATSAPP_PHONE_NUMBER_ID,
-      META_APP_SECRET, META_WEBHOOK_VERIFY_TOKEN to .env. In the Meta
-      Developer Dashboard, set the webhook URL to /webhooks/whatsapp
+DONE: META_WHATSAPP_TOKEN, META_WHATSAPP_PHONE_NUMBER_ID,
+      META_WHATSAPP_BUSINESS_ACCOUNT_ID, META_WEBHOOK_VERIFY_TOKEN
+      all configured in .env. Code fully rewritten for Meta Cloud API
+      (replaced Twilio). Webhook endpoint ready at /webhooks/whatsapp.
+Remaining: Point Meta Developer Dashboard webhook URL to
+      https://ai-lead-api.onrender.com/webhooks/whatsapp
       and subscribe to the "messages" webhook field.
-Why:  Without this, the AI can respond but the response never reaches the
-      lead via WhatsApp. It stays in the database.
-Note: Code is fully rewritten for Meta Cloud API (replaced Twilio).
-      Only needs env vars + Meta Dashboard configuration.
 ```
 
 #### 2.5 Configure Email (SendGrid or SMTP)
@@ -295,27 +294,25 @@ Why:  Hot lead alerts, escalation notifications, and appointment confirmations
       all send email. Your client's team won't know about urgent leads.
 ```
 
-#### 2.6 Deploy Backend to Production Host
+#### 2.6 Deploy Backend to Production Host ✅
 
 ```
-What: Deploy to Railway, Render, Fly.io, AWS, or any cloud provider.
-      Set up HTTPS (SSL/TLS). Point a domain to it.
-Why:  Currently only runs on localhost:8000. Not accessible to Meta
-      webhooks or external systems.
-Requirements:
-  - HTTPS (required by Meta WhatsApp webhooks)
-  - Domain name
-  - Environment variables set on host
-  - Health check monitoring
+DONE: Backend deployed to Render at https://ai-lead-api.onrender.com
+      HTTPS enabled. Health endpoint confirmed working.
+      Start command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+      Python 3.11 runtime. render.yaml configured.
+Remaining: Set production environment variables on Render dashboard
+      (DATABASE_URL, ANTHROPIC_API_KEY, OPENAI_API_KEY, META tokens, etc.)
 ```
 
-#### 2.7 Deploy Frontend
+#### 2.7 Deploy Frontend ⏳
 
 ```
-What: Build the React app and deploy to Vercel, Netlify, or serve via Nginx.
-      Set VITE_API_URL to the production backend URL. Add the frontend
-      origin to ALLOWED_ORIGINS in backend .env.
-Why:  Your client needs a dashboard to see leads, escalations, and analytics.
+IN PROGRESS: Frontend builds successfully (868 KB). Tested locally — login,
+      dashboard, all pages working end-to-end.
+      .env.production has VITE_API_URL=https://ai-lead-api.onrender.com
+Remaining: Deploy to Vercel. Add the Vercel URL to ALLOWED_ORIGINS
+      in backend .env on Render.
 ```
 
 #### 2.8 Create First Client and User ✅
@@ -470,9 +467,7 @@ Why: Need to run API + worker + beat scheduler as separate services.
 
 ```
 
----===========++++++++++++++++=====+++++++++++======++++======++++=====++++====+====+=+=+=+=====+++++++++++++++=========++++++++++=======++++++++
----===========++++++++++++++++=====+++++++++++======++++======++++=====++++====+====+=+=+=+=====+++++++++++++++=========++++++++++=======++++++++
----===========++++++++++++++++=====+++++++++++======++++======++++=====++++====+====+=+=+=+=====+++++++++++++++=========++++++++++=======++++++++
+---
 
 ## Part 3: Evolution Roadmap
 
@@ -482,12 +477,17 @@ _Get one client live and handling real leads._
 
 - [x] Fix pgvector column type
 - [x] Configure OpenAI key
-- [ ] Configure Meta WhatsApp Cloud API
+- [x] Configure Meta WhatsApp Cloud API (tokens in .env, needs Meta Dashboard webhook URL)
 - [ ] Configure SendGrid/SMTP
 - [x] Set up Alembic migrations
-- [ ] Deploy backend (Railway/Render + custom domain + HTTPS)
-- [ ] Deploy frontend (Vercel/Netlify)
+- [x] Deploy backend (Render + HTTPS) — https://ai-lead-api.onrender.com
+- [ ] Deploy frontend (Vercel)
 - [x] Create first client + admin user
+- [x] Fix auth login bug (`user.role.value` on string field)
+- [x] Add missing clients list endpoint (`GET /api/v1/clients`)
+- [x] Configure CORS for development
+- [x] Clean up stale folders (backend/, migrations/, docker/)
+- [x] Remove Docker files (not needed for Render deployment)
 - [ ] Seed initial knowledge base with client's FAQs
 - [ ] Manual end-to-end test: submit web form → AI responds → WhatsApp delivered → lead appears in dashboard
 
@@ -571,300 +571,63 @@ _Become a platform._
 
 | Category                      | Status                                                                                                |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
-| **Backend code completeness** | ~95% — all services, routes, integrations fully coded                                                 |
-| **Frontend completeness**     | 100% — all pages built, 0 TypeScript errors                                                           |
-| **Database**                  | ✅ 13 tables, 42 indexes, pgvector fixed, Alembic migrations operational (2 applied, head clean)      |
-| **AI pipeline**               | Fully coded. Anthropic + OpenAI keys configured. Smoke-tested via web-form webhook.                   |
-| **Integrations configured**   | 2 of 6 (Anthropic + OpenAI). Meta WhatsApp (code ready), SendGrid, HubSpot, Cal.com need keys/config. |
-| **Deployment**                | Nothing deployed. Runs on localhost only.                                                             |
-| **Testing**                   | 0 tests                                                                                               |
-| **Monitoring**                | 0 monitoring                                                                                          |
-| **Client readiness**          | Client + admin user created. Needs deployment + WhatsApp/email config to go live.                     |
-| **Time to first live lead**   | ~3–5 days of focused work on remaining Priority 1 items (deploy + configure WhatsApp + email)         |
-
-FEATURES
-
-1️⃣ Per-Client AI Personality Modes
-
-You already thought about:
-
-Chat mode
-
-Structured mode
-
-Go further:
-
-Allow presets like:
-
-“Luxury Concierge” (formal, premium tone)
-
-“Fast & Direct” (short replies)
-
-“Friendly & Casual”
-
-“Sales Aggressive”
-
-This costs you nothing technically (just prompt variation)
-But increases perceived customization massively.
-
-2️⃣ Auto Escalation Rules
-
-Let clients set:
-
-If lead score > 80 → notify manager
-
-If message contains “urgent” → call staff
-
-If no reply from staff in 5 min → escalate
-
-That makes it feel intelligent and operational.
-
-Hotels love this.
-
-3️⃣ Multi-Language Auto Detection
-
-When guest writes in Spanish:
-
-AI responds in Spanish automatically.
-
-For hotels this is huge.
-
-You can market:
-
-“Instant multilingual front desk.”
-
-High value, low dev cost.
-
-4️⃣ Revenue Mode (Upsell Engine)
-
-Instead of just answering:
-
-AI suggests:
-
-Airport transfer
-
-Late checkout
-
-Breakfast add-on
-
-Room upgrade
-
-Now you’re not just support.
-You’re a revenue optimizer.
-
-That changes pricing power.
-
-5️⃣ Lead Scoring Dashboard
-
-Show:
-
-Hot leads
-
-Cold leads
-
-Conversion probability
-
-Response time impact
-
-People love visual proof.
-
-Even if scoring is simple, perception matters.
-
-6️⃣ Business Hours Intelligence
-
-During business hours:
-→ escalate faster
-
-After hours:
-→ AI handles longer
-
-Weekend:
-→ special flow
-
-That feels advanced.
-
-7️⃣ “Missed Revenue” Report
-
-Show client:
-
-“You had 47 after-hours inquiries this month.”
-
-That’s powerful psychologically.
-
-Even if they didn’t convert, it proves value.
-
-8️⃣ White-Label Mode
-
-Let agencies:
-
-Use their own logo
-
-Use their own domain
-
-Resell to clients
-
-This unlocks B2B2B scaling.
-
-9️⃣ Custom Intake Builder (Big Move)
-
-Instead of hardcoding questions:
-
-Create UI where client can:
-
-Add questions
-
-Choose answer type:
-
-Multiple choice
-
-Free text
-
-Yes/No
-
-Date picker
-
-Set required fields
-
-Now it becomes configurable SaaS.
-
-Very high perceived sophistication.
-
-🔟 SLA Response Timer Display
-
-Show:
-
-“Average response time: 7 seconds.”
-
-That’s a flex feature.
-
-Hotels care about speed.
-
-1️⃣1️⃣ Conversation Replay
-
-Let business see full conversation timeline like:
-
-Customer message
-
-AI reply
-
-Escalation
-
-Staff intervention
-
-Feels enterprise-level.
-
-1️⃣2️⃣ Performance Insights
-
-Show:
-
-Best performing channel (WhatsApp vs SMS)
-
-Most common question
-
-Most common booking date
-
-Drop-off point in funnel
-
-This moves you from automation tool to analytics tool.
-
-1️⃣3️⃣ Smart Follow-Up Sequences
-
-If lead goes silent:
-
-After 2 hours → gentle follow-up
-After 24 hours → reminder
-After 3 days → last attempt
-
-Automated nurture flow.
-
-Very high ROI.
-
-1️⃣4️⃣ Direct Booking Protection Mode (Hotels)
-
-Detect when guest mentions:
-
-“I saw this on Booking.com.”
-
-AI responds:
-“We offer 5% discount for direct bookings.”
-
-Now you’re helping them reduce OTA commission.
-
-Very strong pitch.
-
-1️⃣5️⃣ Cost Control Mode
-
-For heavy clients:
-
-Limit AI tokens
-
-Shorten responses
-
-Switch to structured mode after X messages
-
-This protects your margin.
-
-Smart internal SaaS move.
-
-1️⃣6️⃣ Per-Channel Personality
-
-WhatsApp → casual
-Email → formal
-SMS → concise
-
-Feels polished and intentional.
-
-1️⃣7️⃣ Client ROI Calculator Built-In
-
-Show:
-
-“AI generated 18 additional qualified leads this month.”
-
-Even if estimated.
-
-People stay when they see numbers.
-
-1️⃣8️⃣ Industry Templates
-
-Pre-built presets:
-
-“Boutique Hotel Template”
-
-“Dental Clinic Template”
-
-“Real Estate Template”
-
-Onboarding becomes 5 minutes.
-
-That’s scale.
-
-1️⃣9️⃣ Automated Review Capture
-
-After booking confirmed:
-
-Send message:
-
-“Would you like to leave a review?”
-
-Route to Google.
-
-Increases reviews.
-Huge value.
-
-2️⃣0️⃣ Internal Staff Copilot Mode
-
-Let staff:
-
-Click “Suggest reply”
-
-AI drafts response
-
-Staff edits & sends
-
-Hybrid automation.
-
-Safer for conservative clients.
-
-```
-
-```
+| **Backend code completeness** | ~97% — all services, routes, integrations fully coded. Auth login bug fixed. Clients list endpoint added. |
+| **Frontend completeness**     | 100% — all 12 pages built, 0 TypeScript errors, login tested end-to-end.                               |
+| **Database**                  | ✅ 13 tables, 42 indexes, pgvector fixed, Alembic migrations operational (2 applied, head clean).      |
+| **AI pipeline**               | Fully coded. Anthropic + OpenAI keys configured. Smoke-tested via web-form webhook.                    |
+| **Integrations configured**   | 3 of 6 (Anthropic + OpenAI + Meta WhatsApp). SendGrid, HubSpot, Cal.com need keys/config.              |
+| **Deployment**                | ✅ Backend on Render (HTTPS). Frontend tested locally, ready for Vercel deploy.                        |
+| **Testing**                   | 0 automated tests. Manual: login ✅, webhook ✅, dashboard ✅, clients API ✅.                         |
+| **Monitoring**                | 0 monitoring (Sentry DSN not set)                                                                      |
+| **Client readiness**          | Client + admin user created. Login works. Dashboard loads. Needs Vercel deploy + email config.          |
+| **Time to first live lead**   | ~1–2 days — deploy frontend to Vercel, set Render env vars, configure Meta webhook URL.                |
+
+---
+
+## Part 4: Recent Changes Log
+
+### February 20, 2026
+
+- **Fixed auth login bug** — `user.role.value` crashed on string field; fixed in `auth_service.py` (2 locations)
+- **Fixed `UserResponse` schema** — `role` field changed from `UserRole` enum to `str`; nullable booleans given defaults
+- **Added `GET /api/v1/clients` endpoint** — was missing; frontend `clientsApi.list()` was getting 404 after login
+- **Deployed backend to Render** — confirmed healthy at `https://ai-lead-api.onrender.com`
+- **Admin password reset** — created `scripts/reset_password.py`, password set to known value
+- **Full local test** — backend (port 8000) + frontend (port 3000) running, login → dashboard working end-to-end
+
+### February 19, 2026
+
+- **Replaced Twilio with Meta WhatsApp Cloud API** — new `whatsapp_service.py`, updated webhooks, config, orchestrator
+- **Created seed script** — `scripts/seed_client.py` creates "Sunset Dental" client + admin user
+- **Configured CORS** — `ALLOWED_ORIGINS` in `.env`, logged at startup
+- **Deployed backend to Render** — fixed `app.api.main` import error (stale `backend/` folder)
+- **Cleaned up stale folders** — deleted `backend/`, `migrations/`, `docker/`, `{app/`
+- **Removed Docker files** — `Dockerfile`, `docker-compose.yml`, `docker-compose.prod.yml` removed (using Render)
+- **Fixed requirements.txt** — removed `-e git+`, removed twilio, fixed bcrypt==4.0.1
+
+---
+
+## Part 5: Future Feature Ideas
+
+> _Brainstorm list — not prioritized, for future reference._
+
+1. **Per-Client AI Personality Modes** — presets like "Luxury Concierge", "Fast & Direct", "Friendly & Casual"
+2. **Auto Escalation Rules** — client-configurable (score > 80 → notify, "urgent" → call staff)
+3. **Multi-Language Auto Detection** — AI responds in detected language automatically
+4. **Revenue/Upsell Engine** — AI suggests upgrades, add-ons during conversation
+5. **Lead Scoring Dashboard** — visual hot/cold/conversion probability display
+6. **Business Hours Intelligence** — different AI behavior during/after hours/weekends
+7. **"Missed Revenue" Report** — show after-hours inquiry count to prove value
+8. **White-Label Mode** — agencies use own logo/domain, resell to clients
+9. **Custom Intake Builder** — UI for clients to configure qualification questions
+10. **SLA Response Timer** — display average response time as a feature
+11. **Conversation Replay** — full timeline view (customer → AI → escalation → staff)
+12. **Performance Insights** — best channel, most common question, drop-off points
+13. **Smart Follow-Up Sequences** — automated nurture (2h, 24h, 3d intervals)
+14. **Direct Booking Protection** — detect OTA mentions, offer direct booking discount
+15. **Cost Control Mode** — limit tokens, shorten responses for heavy-usage clients
+16. **Per-Channel Personality** — WhatsApp casual, email formal, SMS concise
+17. **Client ROI Calculator** — show "AI generated X qualified leads this month"
+18. **Industry Templates** — pre-built presets for dental, real estate, hospitality, etc.
+19. **Automated Review Capture** — post-booking prompt to leave Google review
+20. **Staff Copilot Mode** — "Suggest reply" button for human-in-the-loop workflow

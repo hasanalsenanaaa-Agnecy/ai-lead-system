@@ -250,16 +250,16 @@ class UserResponse(BaseModel):
     first_name: str
     last_name: str
     full_name: str
-    phone: Optional[str]
-    avatar_url: Optional[str]
-    role: UserRole
-    is_verified: bool
-    two_factor_enabled: bool
-    client_id: Optional[UUID]
-    timezone: str
-    language: str
+    phone: Optional[str] = None
+    avatar_url: Optional[str] = None
+    role: str  # UserRole enum value as string
+    is_verified: bool = False
+    two_factor_enabled: bool = False
+    client_id: Optional[UUID] = None
+    timezone: str = "UTC"
+    language: str = "en"
     created_at: datetime
-    last_login_at: Optional[datetime]
+    last_login_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

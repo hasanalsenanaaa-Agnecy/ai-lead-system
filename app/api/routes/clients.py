@@ -117,6 +117,16 @@ class UsageResponse(BaseModel):
 # =============================================================================
 
 
+@router.get("", response_model=list[ClientResponse])
+async def list_clients(
+    db: AsyncSession = Depends(get_db_session),
+):
+    """List all clients."""
+    service = ClientService(db)
+    clients = await service.get_active_clients()
+    return clients
+
+
 @router.post("", response_model=ClientCreateResponse, status_code=201)
 async def create_client(
     client_data: ClientCreate,
