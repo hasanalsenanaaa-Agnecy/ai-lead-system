@@ -150,7 +150,7 @@ class KnowledgeService:
                 knowledge_base_id=kb_id,
                 content=chunk["text"],
                 content_hash=content_hash,
-                embedding=str(embedding),
+                embedding=embedding,
                 source=source,
                 chunk_index=i,
                 token_count=len(chunk["text"].split()),
@@ -261,6 +261,10 @@ class KnowledgeService:
         # Using pgvector's <=> operator for cosine distance
         # Cosine similarity = 1 - cosine distance
         
+        # Format the embedding vector as a pgvector-compatible string
+        embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+        
+        # Use CAST() instead of :: to avoid asyncpg parameter syntax conflicts
         query_sql = """
         SELECT 
             kc.id,
@@ -269,7 +273,7 @@ class KnowledgeService:
             kc.metadata,
             kc.chunk_index,
             kb.name as kb_name,
-            1 - (kc.embedding <=> :query_embedding::vector) as similarity
+            1 - (kc.embedding <=> CAST(:query_embedding AS vector)) as similarity
         FROM knowledge_chunks kc
         JOIN knowledge_bases kb ON kc.knowledge_base_id = kb.id
         WHERE kb.client_id = :client_id
@@ -279,7 +283,7 @@ class KnowledgeService:
         
         params: dict[str, Any] = {
             "client_id": str(client_id),
-            "query_embedding": query_embedding,
+            "query_embedding": embedding_str,
         }
         
         if kb_ids:
@@ -287,8 +291,8 @@ class KnowledgeService:
             params["kb_ids"] = [str(kb_id) for kb_id in kb_ids]
         
         query_sql += """
-        AND 1 - (kc.embedding <=> :query_embedding::vector) >= :threshold
-        ORDER BY kc.embedding <=> :query_embedding::vector
+        AND 1 - (kc.embedding <=> CAST(:query_embedding AS vector)) >= :threshold
+        ORDER BY kc.embedding <=> CAST(:query_embedding AS vector)
         LIMIT :max_results
         """
         params["threshold"] = threshold

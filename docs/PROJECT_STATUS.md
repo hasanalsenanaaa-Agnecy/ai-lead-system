@@ -252,7 +252,7 @@ These are listed in priority order. Each must be completed before going live.
 
 ### 🔴 Priority 1: Critical (Cannot Go Live Without)
 
-#### 2.1 Fix pgvector for Semantic Search
+<!-- #### 2.1 Fix pgvector for Semantic Search
 
 ```
 What: The embedding column is TEXT. It needs to be vector(1536).
@@ -276,7 +276,7 @@ What: Generate an initial migration from current models. Run it. Set up
      migration commands in deploy pipeline.
 Why: You cannot safely change the database schema without migrations. Any
      future feature (new column, new table, index) needs Alembic.
-How: alembic revision --autogenerate -m "initial", then alembic upgrade head.
+How: alembic revision --autogenerate -m "initial", then alembic upgrade head. -->
 ```
 
 #### 2.4 Configure Twilio (SMS + WhatsApp)
@@ -563,7 +563,7 @@ _Become a platform._
 | **Time to first live lead**   | ~1–2 weeks of focused work on Priority 1 items                                     |
 
 
-FEATURES:
+FEATURES
 
 1️⃣ Per-Client AI Personality Modes
 

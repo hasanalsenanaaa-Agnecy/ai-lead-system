@@ -10,7 +10,6 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,
@@ -62,7 +61,7 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
     )
     client_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -81,16 +80,16 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
     avatar_url: Mapped[str | None] = mapped_column(String(500))
 
     # Role & Permissions
-    role: Mapped[UserRole] = mapped_column(
-        Enum(UserRole),
-        default=UserRole.AGENT,
-        nullable=False,
+    role: Mapped[str | None] = mapped_column(
+        String(50),
+        server_default="agent",
+        nullable=True,
     )
     permissions: Mapped[str | None] = mapped_column(Text)  # JSON string of custom permissions
 
     # Status
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool | None] = mapped_column(Boolean, server_default="true", nullable=True)
+    is_verified: Mapped[bool | None] = mapped_column(Boolean, server_default="false", nullable=True)
     
     # Email verification
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -103,20 +102,20 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Two-Factor Authentication
-    two_factor_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    two_factor_enabled: Mapped[bool | None] = mapped_column(Boolean, server_default="false", nullable=True)
     two_factor_secret: Mapped[str | None] = mapped_column(String(255))
     two_factor_backup_codes: Mapped[str | None] = mapped_column(Text)  # JSON array, hashed
 
     # Session tracking
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_ip: Mapped[str | None] = mapped_column(String(45))  # IPv6 length
-    login_count: Mapped[int] = mapped_column(Integer, default=0)
-    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    login_count: Mapped[int | None] = mapped_column(Integer, server_default="0", nullable=True)
+    failed_login_attempts: Mapped[int | None] = mapped_column(Integer, server_default="0", nullable=True)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Preferences
-    timezone: Mapped[str] = mapped_column(String(50), default="Asia/Riyadh")
-    language: Mapped[str] = mapped_column(String(10), default="en")
+    timezone: Mapped[str | None] = mapped_column(String(50), server_default="UTC", nullable=True)
+    language: Mapped[str | None] = mapped_column(String(10), server_default="en", nullable=True)
     notification_preferences: Mapped[str | None] = mapped_column(Text)  # JSON
 
     # Relationships
@@ -163,7 +162,7 @@ class UserSession(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -182,17 +181,18 @@ class UserSession(Base, TimestampMixin):
     
     # Expiration
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    remember_me: Mapped[bool] = mapped_column(Boolean, default=False)
+    remember_me: Mapped[bool | None] = mapped_column(Boolean, server_default="false", nullable=True)
     
     # Status
-    is_valid: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_valid: Mapped[bool | None] = mapped_column(Boolean, server_default="true", nullable=True)
     invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     invalidation_reason: Mapped[str | None] = mapped_column(String(100))
 
     # Last activity
-    last_activity_at: Mapped[datetime] = mapped_column(
+    last_activity_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
+        nullable=True,
     )
 
     # Relationships
@@ -222,7 +222,7 @@ class AuditLog(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
     )
     client_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -249,7 +249,7 @@ class AuditLog(Base, TimestampMixin):
     
     # Additional info
     description: Mapped[str | None] = mapped_column(Text)
-    severity: Mapped[str] = mapped_column(String(20), default="info")  # info, warning, critical
+    severity: Mapped[str | None] = mapped_column(String(20), server_default="info", nullable=True)
 
     # Relationships
     user: Mapped["User"] = relationship(back_populates="audit_logs")
@@ -278,14 +278,14 @@ class RateLimitRecord(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
     )
     
     # Identifier
     key: Mapped[str] = mapped_column(String(255), nullable=False)  # e.g., "ip:192.168.1.1:login"
     
     # Tracking
-    request_count: Mapped[int] = mapped_column(Integer, default=1)
+    request_count: Mapped[int | None] = mapped_column(Integer, server_default="1", nullable=True)
     window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     

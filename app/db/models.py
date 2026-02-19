@@ -9,7 +9,6 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
-    JSON,
     Boolean,
     DateTime,
     Float,
@@ -20,15 +19,16 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 
 
 class Base(DeclarativeBase):
     """Base class for all database models."""
 
     type_annotation_map = {
-        dict[str, Any]: JSON,
+        dict[str, Any]: JSONB,
         list[str]: ARRAY(String),
     }
 
@@ -110,16 +110,16 @@ class EscalationReason(str, enum.Enum):
 class TimestampMixin:
     """Adds created_at and updated_at timestamps."""
 
-    created_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
-        nullable=False,
+        nullable=True,
     )
-    updated_at: Mapped[datetime] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
-        nullable=False,
+        nullable=True,
     )
 
 
@@ -153,21 +153,21 @@ class Client(Base, TimestampMixin, SoftDeleteMixin):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    status: Mapped[str] = mapped_column(
+    status: Mapped[str | None] = mapped_column(
         String(50),
-        default=ClientStatus.ONBOARDING.value,
-        nullable=False,
+        server_default="onboarding",
+        nullable=True,
     )
 
     # Business Info
     industry: Mapped[str | None] = mapped_column(String(100))
     website: Mapped[str | None] = mapped_column(String(500))
-    timezone: Mapped[str] = mapped_column(String(50), default="America/New_York")
-    primary_language: Mapped[str] = mapped_column(String(10), default="en")
+    timezone: Mapped[str | None] = mapped_column(String(50), server_default="America/New_York")
+    primary_language: Mapped[str | None] = mapped_column(String(10), server_default="en")
 
     # Contact
     owner_name: Mapped[str | None] = mapped_column(String(255))
@@ -181,12 +181,12 @@ class Client(Base, TimestampMixin, SoftDeleteMixin):
         return config.get("notification_email") or self.owner_email
 
     # Configuration
-    config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, server_default="{}", nullable=True)
 
     # Billing
-    plan: Mapped[str] = mapped_column(String(50), default="growth")
-    monthly_token_budget: Mapped[int] = mapped_column(Integer, default=1_000_000)
-    tokens_used_this_month: Mapped[int] = mapped_column(Integer, default=0)
+    plan: Mapped[str | None] = mapped_column(String(50), server_default="growth", nullable=True)
+    monthly_token_budget: Mapped[int | None] = mapped_column(Integer, server_default="1000000", nullable=True)
+    tokens_used_this_month: Mapped[int | None] = mapped_column(Integer, server_default="0", nullable=True)
     billing_cycle_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # API Access
@@ -218,7 +218,7 @@ class Lead(Base, TimestampMixin, SoftDeleteMixin):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -243,24 +243,24 @@ class Lead(Base, TimestampMixin, SoftDeleteMixin):
     landing_page: Mapped[str | None] = mapped_column(String(500))
 
     # Qualification
-    status: Mapped[str] = mapped_column(
+    status: Mapped[str | None] = mapped_column(
         String(50),
-        default=LeadStatus.NEW.value,
-        nullable=False,
+        server_default="new",
+        nullable=True,
     )
-    score: Mapped[str] = mapped_column(
+    score: Mapped[str | None] = mapped_column(
         String(50),
-        default=LeadScore.UNSCORED.value,
-        nullable=False,
+        server_default="unscored",
+        nullable=True,
     )
-    score_value: Mapped[int] = mapped_column(Integer, default=0)
-    qualification_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    score_value: Mapped[int | None] = mapped_column(Integer, server_default="0", nullable=True)
+    qualification_data: Mapped[dict[str, Any] | None] = mapped_column(JSONB, server_default="{}", nullable=True)
 
     # Service Interest
     service_interest: Mapped[str | None] = mapped_column(String(255))
-    urgency: Mapped[str | None] = mapped_column(String(50))
+    urgency: Mapped[str | None] = mapped_column(String(100))
     budget_range: Mapped[str | None] = mapped_column(String(100))
-    preferred_contact_time: Mapped[str | None] = mapped_column(String(255))
+    preferred_contact_time: Mapped[str | None] = mapped_column(String(100))
     location: Mapped[str | None] = mapped_column(String(255))
 
     # Notes
@@ -279,7 +279,7 @@ class Lead(Base, TimestampMixin, SoftDeleteMixin):
     crm_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Metadata
-    lead_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    lead_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB, server_default="{}", nullable=True)
 
     # Relationships
     client: Mapped["Client"] = relationship(back_populates="leads")
@@ -308,7 +308,7 @@ class Conversation(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -326,8 +326,8 @@ class Conversation(Base, TimestampMixin):
     channel_conversation_id: Mapped[str | None] = mapped_column(String(255))
 
     # State
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    is_escalated: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool | None] = mapped_column(Boolean, server_default="true", nullable=True)
+    is_escalated: Mapped[bool | None] = mapped_column(Boolean, server_default="false", nullable=True)
     escalation_reason: Mapped[str | None] = mapped_column(String(100))
     escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -339,7 +339,7 @@ class Conversation(Base, TimestampMixin):
     escalation_details: Mapped[str | None] = mapped_column(Text)
 
     # Metrics
-    message_count: Mapped[int] = mapped_column(Integer, default=0)
+    message_count: Mapped[int | None] = mapped_column(Integer, server_default="0", nullable=True)
     sentiment_score: Mapped[float | None] = mapped_column(Float)
 
     # Summary (for long-term memory)
@@ -375,7 +375,7 @@ class Message(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
     )
     conversation_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -386,11 +386,11 @@ class Message(Base, TimestampMixin):
     # Content
     role: Mapped[str] = mapped_column(String(50), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    content_type: Mapped[str] = mapped_column(String(50), default="text")
+    content_type: Mapped[str | None] = mapped_column(String(50), server_default="text", nullable=True)
 
     # AI Processing
-    tokens_input: Mapped[int] = mapped_column(Integer, default=0)
-    tokens_output: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_input: Mapped[int | None] = mapped_column(Integer, server_default="0", nullable=True)
+    tokens_output: Mapped[int | None] = mapped_column(Integer, server_default="0", nullable=True)
     model_used: Mapped[str | None] = mapped_column(String(100))
     confidence_score: Mapped[float | None] = mapped_column(Float)
     processing_time_ms: Mapped[int | None] = mapped_column(Integer)
@@ -402,11 +402,11 @@ class Message(Base, TimestampMixin):
     # Analysis
     intent: Mapped[str | None] = mapped_column(String(100))
     sentiment: Mapped[str | None] = mapped_column(String(50))
-    entities: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    entities: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     # Metadata
-    msg_metadata: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSON, default=dict
+    msg_metadata: Mapped[dict[str, Any] | None] = mapped_column(
+        "metadata", JSONB, server_default="{}", nullable=True
     )
 
     # Relationships
@@ -429,7 +429,7 @@ class KnowledgeBase(Base, TimestampMixin, SoftDeleteMixin):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -440,14 +440,14 @@ class KnowledgeBase(Base, TimestampMixin, SoftDeleteMixin):
     # Metadata
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
-    category: Mapped[str] = mapped_column(String(100), default="general")
-    source_type: Mapped[str] = mapped_column(String(50), default="document")
+    category: Mapped[str | None] = mapped_column(String(100), server_default="general", nullable=True)
+    source_type: Mapped[str | None] = mapped_column(String(50), server_default="document", nullable=True)
     source_url: Mapped[str | None] = mapped_column(String(500))
 
     # Status
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
-    document_count: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool | None] = mapped_column(Boolean, server_default="true", nullable=True)
+    chunk_count: Mapped[int | None] = mapped_column(Integer, server_default="0", nullable=True)
+    document_count: Mapped[int | None] = mapped_column(Integer, server_default="0", nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships
@@ -473,7 +473,7 @@ class KnowledgeChunk(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
     )
     knowledge_base_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -492,16 +492,16 @@ class KnowledgeChunk(Base, TimestampMixin):
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
     source: Mapped[str | None] = mapped_column(String(500))
 
-    # Embedding (stored as text-serialized vector for pgvector)
-    embedding: Mapped[str | None] = mapped_column(Text)
+    # Embedding (pgvector vector type for cosine similarity search)
+    embedding = mapped_column(Vector(1536), nullable=True)
 
     # Status
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool | None] = mapped_column(Boolean, server_default="true", nullable=True)
 
     # Metadata
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    chunk_metadata: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSON, default=dict
+    chunk_metadata: Mapped[dict[str, Any] | None] = mapped_column(
+        "metadata", JSONB, server_default="{}", nullable=True
     )
 
     # Relationships
@@ -523,7 +523,7 @@ class QualificationRule(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -534,9 +534,9 @@ class QualificationRule(Base, TimestampMixin):
     # Rule Definition
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
-    category: Mapped[str] = mapped_column(String(100), default="qualification")
-    priority: Mapped[int] = mapped_column(Integer, default=0)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    category: Mapped[str | None] = mapped_column(String(100), server_default="qualification", nullable=True)
+    priority: Mapped[int | None] = mapped_column(Integer, server_default="0", nullable=True)
+    is_active: Mapped[bool | None] = mapped_column(Boolean, server_default="true", nullable=True)
 
     # Rule Logic
     field: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -544,7 +544,7 @@ class QualificationRule(Base, TimestampMixin):
     value: Mapped[str] = mapped_column(Text, nullable=False)
 
     # Scoring Impact
-    score_impact: Mapped[int] = mapped_column(Integer, default=0)
+    score_impact: Mapped[int | None] = mapped_column(Integer, server_default="0", nullable=True)
     result_score: Mapped[str | None] = mapped_column(String(50))
     result_action: Mapped[str | None] = mapped_column(String(100))
 
@@ -568,7 +568,7 @@ class Escalation(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -589,10 +589,10 @@ class Escalation(Base, TimestampMixin):
     # Escalation Details
     reason: Mapped[str] = mapped_column(String(100), nullable=False)
     reason_details: Mapped[str | None] = mapped_column(Text)
-    priority: Mapped[str] = mapped_column(String(50), default="normal")
+    priority: Mapped[str | None] = mapped_column(String(50), server_default="normal", nullable=True)
 
     # Status
-    status: Mapped[str] = mapped_column(String(50), default="pending")
+    status: Mapped[str | None] = mapped_column(String(50), server_default="pending", nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolved_by: Mapped[str | None] = mapped_column(String(255))
     resolution_notes: Mapped[str | None] = mapped_column(Text)
@@ -622,7 +622,7 @@ class UsageLog(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -638,7 +638,7 @@ class UsageLog(Base, TimestampMixin):
     tokens_total: Mapped[int] = mapped_column(Integer, nullable=False)
 
     # Cost (in microdollars for precision)
-    cost_microdollars: Mapped[int] = mapped_column(Integer, default=0)
+    cost_microdollars: Mapped[int | None] = mapped_column(Integer, server_default="0", nullable=True)
 
     # Context
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
