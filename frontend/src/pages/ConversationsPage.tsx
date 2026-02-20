@@ -101,18 +101,20 @@ export default function ConversationsPage() {
   const { data: conversationsData, isLoading: loadingConversations } = useQuery({
     queryKey: ['conversations', currentClient?.id, filter],
     queryFn: async () => {
-      if (!currentClient?.id) return { conversations: [] as Conversation[], total: 0 };
+      if (!currentClient?.id) return { items: [] as Conversation[], total: 0 };
       if (filter === 'active') {
-        const conversations = await conversationsApi.getActive(currentClient.id);
-        return { conversations, total: conversations.length };
+        const result = await conversationsApi.getActive(currentClient.id);
+        const items = Array.isArray(result) ? result : result.items ?? [];
+        return { items, total: items.length };
       }
       if (filter === 'escalated') {
-        const conversations = await conversationsApi.getEscalated(currentClient.id);
-        return { conversations, total: conversations.length };
+        const result = await conversationsApi.getEscalated(currentClient.id);
+        const items = Array.isArray(result) ? result : result.items ?? [];
+        return { items, total: items.length };
       }
       const filters = filter === 'ended' ? { is_active: false as const } : undefined;
       const result = await conversationsApi.list(currentClient.id, filters, 1, 50);
-      return { conversations: (result.items || []) as Conversation[], total: result.total || 0 };
+      return { items: (result.items || []) as Conversation[], total: result.total || 0 };
     },
     enabled: !!currentClient?.id,
   });
@@ -129,7 +131,8 @@ export default function ConversationsPage() {
     enabled: !!selectedConversation,
   });
 
-  const conversations = conversationsData?.conversations || [];
+  console.log('conversationsData', conversationsData);
+  const conversations = conversationsData?.items ?? [];
   const filteredConversations = conversations.filter((c) => {
     if (!search) return true;
     return (

@@ -255,6 +255,39 @@ async def get_conversation_metrics(
     }
 
 
+@router.get("/client/{client_id}", response_model=dict)
+async def list_conversations_by_client(
+    client_id: UUID,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    is_active: bool | None = None,
+    is_escalated: bool | None = None,
+    channel: str | None = None,
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Get paginated conversations for a client with optional filters."""
+    service = ConversationService(db)
+
+    conversations, total = await service.get_conversations_by_client(
+        client_id=client_id,
+        is_active=is_active,
+        is_escalated=is_escalated,
+        channel=channel,
+        page=page,
+        per_page=per_page,
+    )
+
+    return {
+        "items": [
+            ConversationResponse.model_validate(c) for c in conversations
+        ],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": (total + per_page - 1) // per_page,
+    }
+
+
 @router.get("/client/{client_id}/active", response_model=ConversationListResponse)
 async def get_active_conversations(
     client_id: UUID,

@@ -298,6 +298,41 @@ class ConversationService:
         result = await self.db.execute(query)
         return result.scalar() or 0
 
+    async def get_conversations_by_client(
+        self,
+        client_id: UUID,
+        is_active: bool | None = None,
+        is_escalated: bool | None = None,
+        channel: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> tuple[list[Conversation], int]:
+        """Get paginated conversations for a client with optional filters."""
+        base = select(Conversation).where(Conversation.client_id == client_id)
+        count_q = select(func.count()).select_from(Conversation).where(
+            Conversation.client_id == client_id
+        )
+
+        if is_active is not None:
+            base = base.where(Conversation.is_active == is_active)
+            count_q = count_q.where(Conversation.is_active == is_active)
+        if is_escalated is not None:
+            base = base.where(Conversation.is_escalated == is_escalated)
+            count_q = count_q.where(Conversation.is_escalated == is_escalated)
+        if channel:
+            base = base.where(Conversation.channel == channel)
+            count_q = count_q.where(Conversation.channel == channel)
+
+        total = (await self.db.execute(count_q)).scalar() or 0
+
+        offset = (page - 1) * per_page
+        rows = await self.db.execute(
+            base.order_by(Conversation.updated_at.desc())
+            .offset(offset)
+            .limit(per_page)
+        )
+        return list(rows.scalars().all()), total
+
     async def get_active_conversations(
         self,
         client_id: UUID,

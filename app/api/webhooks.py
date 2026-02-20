@@ -9,7 +9,7 @@ import time
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +20,11 @@ from app.db.session import get_db_session
 from app.services.lead_service import LeadService
 from app.services.conversation_service import ConversationService
 from app.integrations.whatsapp_service import get_whatsapp_service
+from app.worker import (
+    process_ai_response as process_ai_response_task,
+    process_missed_call_followup as process_missed_call_followup_task,
+    mark_whatsapp_as_read as mark_whatsapp_as_read_task,
+)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -113,12 +118,11 @@ async def verify_client_api_key(
 @router.post("/web-form", response_model=WebhookResponse)
 async def receive_web_form(
     lead_data: WebFormLead,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db_session),
 ):
     """
     Receive lead from web form submission.
-    Creates lead, starts conversation, and triggers AI response.
+    Creates lead, starts conversation, and triggers AI response via Celery.
     """
     lead_service = LeadService(db)
     conversation_service = ConversationService(db)
@@ -154,12 +158,11 @@ async def receive_web_form(
             content=lead_data.message,
         )
 
-        # Queue AI response processing
-        background_tasks.add_task(
-            process_ai_response,
-            conversation_id=conversation.id,
-            lead_id=lead.id,
-            client_id=lead_data.client_id,
+        # Queue AI response via Celery (retries, persistence, dead-letter)
+        process_ai_response_task.delay(
+            str(conversation.id),
+            str(lead.id),
+            str(lead_data.client_id),
         )
 
         return WebhookResponse(
@@ -200,7 +203,6 @@ async def verify_whatsapp_webhook(request: Request):
 @router.post("/whatsapp")
 async def receive_whatsapp(
     request: Request,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db_session),
 ):
     """
@@ -289,15 +291,14 @@ async def receive_whatsapp(
             external_message_id=message_id,
         )
 
-        # Mark as read
-        background_tasks.add_task(_mark_as_read, message_id)
+        # Mark as read via Celery
+        mark_whatsapp_as_read_task.delay(message_id)
 
-        # Queue AI response
-        background_tasks.add_task(
-            process_ai_response,
-            conversation_id=conversation.id,
-            lead_id=lead.id,
-            client_id=client.id,
+        # Queue AI response via Celery
+        process_ai_response_task.delay(
+            str(conversation.id),
+            str(lead.id),
+            str(client.id),
         )
 
     return {"status": "ok"}
@@ -311,11 +312,11 @@ async def receive_whatsapp(
 @router.post("/live-chat", response_model=WebhookResponse)
 async def receive_live_chat(
     message: LiveChatMessage,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db_session),
 ):
     """
     Receive message from live chat widget.
+    Queues AI response via Celery.
     """
     lead_service = LeadService(db)
     conversation_service = ConversationService(db)
@@ -345,12 +346,11 @@ async def receive_live_chat(
         content=message.message,
     )
 
-    # Queue AI response
-    background_tasks.add_task(
-        process_ai_response,
-        conversation_id=conversation.id,
-        lead_id=lead.id,
-        client_id=message.client_id,
+    # Queue AI response via Celery
+    process_ai_response_task.delay(
+        str(conversation.id),
+        str(lead.id),
+        str(message.client_id),
     )
 
     return WebhookResponse(
@@ -369,12 +369,11 @@ async def receive_live_chat(
 @router.post("/missed-call", response_model=WebhookResponse)
 async def receive_missed_call(
     call: MissedCallWebhook,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db_session),
 ):
     """
     Handle missed call notification.
-    Creates lead and initiates outbound WhatsApp follow-up.
+    Creates lead and initiates outbound WhatsApp follow-up via Celery.
     """
     lead_service = LeadService(db)
     conversation_service = ConversationService(db)
@@ -395,13 +394,12 @@ async def receive_missed_call(
         channel=ChannelType.MISSED_CALL,
     )
 
-    # Queue missed call follow-up
-    background_tasks.add_task(
-        process_missed_call_followup,
-        conversation_id=conversation.id,
-        lead_id=lead.id,
-        client_id=call.client_id,
-        caller_phone=call.caller_phone,
+    # Queue missed call follow-up via Celery
+    process_missed_call_followup_task.delay(
+        str(conversation.id),
+        str(lead.id),
+        str(call.client_id),
+        call.caller_phone,
     )
 
     return WebhookResponse(
@@ -412,62 +410,6 @@ async def receive_missed_call(
     )
 
 
-# =============================================================================
-# Background Task Helpers
-# =============================================================================
-
-
-async def _mark_as_read(message_id: str) -> None:
-    """Mark an incoming WhatsApp message as read (blue ticks)."""
-    try:
-        wa = get_whatsapp_service()
-        await wa.mark_as_read(message_id)
-    except Exception:
-        pass  # Non-critical
-
-
-# =============================================================================
-# Background Task Handlers
-# =============================================================================
-
-
-async def process_ai_response(
-    conversation_id: UUID,
-    lead_id: UUID,
-    client_id: UUID,
-) -> None:
-    """
-    Background task to process AI response for a message.
-    """
-    from app.db.session import get_db_context
-    from app.services.orchestrator import ConversationOrchestrator
-
-    async with get_db_context() as db:
-        orchestrator = ConversationOrchestrator(db)
-        await orchestrator.process_and_respond(
-            conversation_id=conversation_id,
-            lead_id=lead_id,
-            client_id=client_id,
-        )
-
-
-async def process_missed_call_followup(
-    conversation_id: UUID,
-    lead_id: UUID,
-    client_id: UUID,
-    caller_phone: str,
-) -> None:
-    """
-    Background task to send missed call follow-up message.
-    """
-    from app.db.session import get_db_context
-    from app.services.orchestrator import ConversationOrchestrator
-
-    async with get_db_context() as db:
-        orchestrator = ConversationOrchestrator(db)
-        await orchestrator.send_missed_call_followup(
-            conversation_id=conversation_id,
-            lead_id=lead_id,
-            client_id=client_id,
-            phone=caller_phone,
-        )
+# NOTE: All background processing is now handled by Celery tasks in app/worker.py
+# Tasks used: process_ai_response, process_missed_call_followup, mark_whatsapp_as_read
+# This provides automatic retries, dead-letter queues, and task persistence via Redis.

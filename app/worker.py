@@ -103,10 +103,10 @@ def process_ai_response(
     6. Handles post-response actions
     """
     async def _process():
-        from app.db.session import get_async_session
+        from app.db.session import get_db_context
         from app.services.orchestrator import ConversationOrchestrator
         
-        async with get_async_session() as db:
+        async with get_db_context() as db:
             orchestrator = ConversationOrchestrator(db)
             await orchestrator.process_and_respond(
                 conversation_id=UUID(conversation_id),
@@ -119,6 +119,52 @@ def process_ai_response(
     return self.run_async(_process())
 
 
+@celery_app.task(bind=True, base=AsyncTask, name="app.worker.process_missed_call_followup")
+def process_missed_call_followup(
+    self,
+    conversation_id: str,
+    lead_id: str,
+    client_id: str,
+    caller_phone: str,
+) -> dict[str, Any]:
+    """
+    Send automated WhatsApp follow-up for a missed call.
+    Creates a friendly message and sends it to the caller via WhatsApp.
+    """
+    async def _process():
+        from app.db.session import get_db_context
+        from app.services.orchestrator import ConversationOrchestrator
+
+        async with get_db_context() as db:
+            orchestrator = ConversationOrchestrator(db)
+            await orchestrator.send_missed_call_followup(
+                conversation_id=UUID(conversation_id),
+                lead_id=UUID(lead_id),
+                client_id=UUID(client_id),
+                phone=caller_phone,
+            )
+
+        return {"status": "sent", "conversation_id": conversation_id}
+
+    return self.run_async(_process())
+
+
+@celery_app.task(bind=True, base=AsyncTask, name="app.worker.mark_whatsapp_as_read")
+def mark_whatsapp_as_read(
+    self,
+    message_id: str,
+) -> dict[str, Any]:
+    """Mark an incoming WhatsApp message as read (blue ticks)."""
+    async def _mark():
+        from app.integrations.whatsapp_service import get_whatsapp_service
+
+        wa = get_whatsapp_service()
+        await wa.mark_as_read(message_id)
+        return {"status": "marked_read", "message_id": message_id}
+
+    return self.run_async(_mark())
+
+
 @celery_app.task(bind=True, base=AsyncTask, name="app.worker.generate_greeting")
 def generate_greeting(
     self,
@@ -128,10 +174,10 @@ def generate_greeting(
 ) -> dict[str, Any]:
     """Generate and send initial greeting for new conversation."""
     async def _generate():
-        from app.db.session import get_async_session
+        from app.db.session import get_db_context
         from app.services.orchestrator import ConversationOrchestrator
         
-        async with get_async_session() as db:
+        async with get_db_context() as db:
             orchestrator = ConversationOrchestrator(db)
             greeting = await orchestrator.generate_greeting(
                 conversation_id=UUID(conversation_id),
@@ -287,12 +333,12 @@ def sync_lead_to_hubspot(
 ) -> dict[str, Any]:
     """Sync lead data to HubSpot CRM."""
     async def _sync():
-        from app.db.session import get_async_session
+        from app.db.session import get_db_context
         from app.services.lead_service import LeadService
         from app.services.conversation_service import ConversationService
         from app.integrations.hubspot_service import get_hubspot_service
         
-        async with get_async_session() as db:
+        async with get_db_context() as db:
             lead_service = LeadService(db)
             conv_service = ConversationService(db)
             
@@ -334,11 +380,11 @@ def sync_lead_to_hubspot(
 def sync_pending_crm_records(self) -> dict[str, Any]:
     """Sync all pending leads to CRM (periodic task)."""
     async def _sync():
-        from app.db.session import get_async_session
+        from app.db.session import get_db_context
         from sqlalchemy import select
         from app.db.models import Lead, Client
         
-        async with get_async_session() as db:
+        async with get_db_context() as db:
             # Find leads not synced in last hour
             cutoff = datetime.utcnow() - timedelta(hours=1)
             
@@ -381,11 +427,11 @@ def book_appointment(
 ) -> dict[str, Any]:
     """Book appointment via Cal.com."""
     async def _book():
-        from app.db.session import get_async_session
+        from app.db.session import get_db_context
         from app.services.lead_service import LeadService
         from app.integrations.calendar_service import get_calendar_service
         
-        async with get_async_session() as db:
+        async with get_db_context() as db:
             lead_service = LeadService(db)
             lead = await lead_service.get_by_id(UUID(lead_id))
             
@@ -426,12 +472,12 @@ def book_appointment(
 def send_daily_summaries(self) -> dict[str, Any]:
     """Send daily summary emails to all active clients."""
     async def _send():
-        from app.db.session import get_async_session
+        from app.db.session import get_db_context
         from sqlalchemy import select, func
         from app.db.models import Client, Lead, Conversation, Escalation, ClientStatus
         from app.integrations.email_service import get_email_service
         
-        async with get_async_session() as db:
+        async with get_db_context() as db:
             # Get active clients
             result = await db.execute(
                 select(Client).where(Client.status == ClientStatus.ACTIVE)
@@ -532,11 +578,11 @@ async def _get_daily_stats(db, client_id: UUID, date) -> dict[str, Any]:
 def cleanup_old_data(self) -> dict[str, Any]:
     """Clean up old conversation data (per retention policy)."""
     async def _cleanup():
-        from app.db.session import get_async_session
+        from app.db.session import get_db_context
         from sqlalchemy import delete
         from app.db.models import Message, Conversation
         
-        async with get_async_session() as db:
+        async with get_db_context() as db:
             # Delete messages older than 90 days
             cutoff = datetime.utcnow() - timedelta(days=90)
             
@@ -573,10 +619,10 @@ def update_token_usage(
 ) -> dict[str, Any]:
     """Update client token usage (called after each AI interaction)."""
     async def _update():
-        from app.db.session import get_async_session
+        from app.db.session import get_db_context
         from app.services.client_service import ClientService
         
-        async with get_async_session() as db:
+        async with get_db_context() as db:
             client_service = ClientService(db)
             await client_service.track_token_usage(
                 client_id=UUID(client_id),
@@ -603,10 +649,10 @@ def ingest_document(
 ) -> dict[str, Any]:
     """Ingest document into knowledge base (async)."""
     async def _ingest():
-        from app.db.session import get_async_session
+        from app.db.session import get_db_context
         from app.services.knowledge_service import KnowledgeService
         
-        async with get_async_session() as db:
+        async with get_db_context() as db:
             kb_service = KnowledgeService(db)
             chunks = await kb_service.ingest_document(
                 kb_id=UUID(kb_id),
@@ -628,10 +674,10 @@ def bulk_ingest_faqs(
 ) -> dict[str, Any]:
     """Bulk ingest FAQs into knowledge base."""
     async def _ingest():
-        from app.db.session import get_async_session
+        from app.db.session import get_db_context
         from app.services.knowledge_service import KnowledgeService
         
-        async with get_async_session() as db:
+        async with get_db_context() as db:
             kb_service = KnowledgeService(db)
             total_chunks = await kb_service.bulk_ingest_faqs(
                 kb_id=UUID(kb_id),

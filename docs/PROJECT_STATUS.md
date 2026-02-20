@@ -12,14 +12,14 @@
 
 The system is a **multi-tenant AI-powered lead qualification platform**. A single deployment serves multiple business clients — each with their own leads, conversations, knowledge bases, and billing.
 
-| Layer            | Technology                                                     | Status                                |
-| ---------------- | -------------------------------------------------------------- | ------------------------------------- |
-| API Server       | FastAPI + Uvicorn (async)                                      | ✅ Starts, routes respond             |
-| Database         | PostgreSQL via Supabase (13 tables)                            | ✅ Connected, all tables exist        |
-| AI Engine        | Anthropic Claude (Sonnet for qualification, Haiku for routing) | ✅ Code complete, API key configured  |
-| Frontend         | React 18 + TypeScript + Vite + Tailwind                        | ✅ Builds, all pages implemented      |
-| Background Jobs  | Celery + Redis                                                 | ⚠️ Code written, Redis not configured |
-| Deployment       | Render (backend) + Vercel (frontend)                           | ✅ Backend deployed on Render          |
+| Layer           | Technology                                                     | Status                                           |
+| --------------- | -------------------------------------------------------------- | ------------------------------------------------ |
+| API Server      | FastAPI + Uvicorn (async)                                      | ✅ Starts, routes respond                        |
+| Database        | PostgreSQL via Supabase (13 tables)                            | ✅ Connected, all tables exist                   |
+| AI Engine       | Anthropic Claude (Sonnet for qualification, Haiku for routing) | ✅ Code complete, API key configured             |
+| Frontend        | React 18 + TypeScript + Vite + Tailwind                        | ✅ Builds, all pages implemented                 |
+| Background Jobs | Celery + Redis                                                 | ✅ Connected to Redis Cloud, 16 tasks registered |
+| Deployment      | Render (backend) + Vercel (frontend)                           | ✅ Backend deployed on Render                    |
 
 ### 1.2 Backend — What's Wired and Functional
 
@@ -35,7 +35,7 @@ The system receives inbound leads from five different channels via webhook endpo
 | `POST /webhooks/live-chat`   | Live chat widget  | Receives JSON with session_id, visitor info, message. Manages conversations by session. Queues AI response.           |
 | `POST /webhooks/missed-call` | Missed calls      | Receives caller phone + client_id. Creates lead. Sends automated WhatsApp follow-up.                                  |
 
-WhatsApp webhooks use Meta X-Hub-Signature-256 verification in production mode. All use `BackgroundTasks` to process AI responses asynchronously.
+WhatsApp webhooks use Meta X-Hub-Signature-256 verification in production mode. All webhooks dispatch AI processing to **Celery tasks** via `.delay()` for production-grade retries, persistence, and dead-letter handling.
 
 #### AI Conversation Engine (Fully Coded)
 
@@ -201,7 +201,7 @@ The `worker.py` (660 lines) defines:
 
 Beat schedule configured for daily summaries, daily cleanup, and 5-minute CRM sync.
 
-> **⚠️ Not running:** Redis is not configured in `.env`. Celery workers cannot start without Redis.
+> **✅ Running:** Redis Cloud configured. Celery worker starts with 16 tasks across 7 queues (ai, delivery, notifications, integrations, reports, maintenance, celery). All webhook handlers dispatch via `.delay()`. Beat schedule configured for daily summaries, daily cleanup, and 5-minute CRM sync.
 
 ### 1.6 Database Schema (13 Tables — All Exist)
 
@@ -223,25 +223,25 @@ Beat schedule configured for daily summaries, daily cleanup, and 5-minute CRM sy
 
 ### 1.7 What's NOT Working / Missing
 
-| Item                           | Details                                                                                                     |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| ~~**pgvector**~~               | ✅ FIXED — `vector` extension enabled, column is `vector(1536)`, IVFFlat cosine index created.              |
-| **Redis / Celery**             | Not configured. Background tasks fall back to `BackgroundTasks` (in-process, no retry, no persistence).     |
-| ~~**No Alembic migrations**~~  | ✅ FIXED — 2 migrations applied, `alembic check` clean.                                                     |
-| **init_db() commented out**    | In `main.py`, the `await init_db()` call is commented out in the lifespan. DB tables are assumed to exist.  |
-| **No tests**                   | `tests/` directory contains only an empty `__init__.py`. Zero test coverage.                                |
-| **No CI/CD**                   | No GitHub Actions, no deployment pipeline.                                                                  |
-| **No monitoring**              | Sentry DSN not set. No Prometheus/Grafana. No uptime monitoring.                                            |
-| **Email not configured**       | No SendGrid key, no SMTP. Escalation/hot-lead email alerts won't send.                                      |
-| ~~**WhatsApp not configured**~~| ✅ FIXED — Meta WhatsApp Cloud API tokens configured in `.env`. Code fully rewritten from Twilio.           |
-| ~~**OpenAI not configured**~~  | ✅ FIXED — `OPENAI_API_KEY` configured in `.env`. Embeddings functional.                                    |
-| **HubSpot not configured**     | CRM sync silently skips.                                                                                    |
-| **Cal.com not configured**     | Appointment booking silently skips.                                                                         |
-| ~~**Frontend not connected**~~ | ✅ FIXED — CORS configured for dev (`localhost:3000,5173`). `VITE_API_URL` set. Login tested end-to-end.    |
-| ~~**No SSL/TLS**~~             | ✅ FIXED — Backend deployed to Render with HTTPS.                                                           |
-| **No web-chat widget**         | The `/webhooks/live-chat` endpoint exists, but there's no embeddable JavaScript widget for client websites. |
-| **No real-time**               | No WebSocket or SSE. The frontend polls for data; live chat has no push delivery.                           |
-| **No file uploads**            | Document ingestion accepts text only. No PDF/DOCX parsing.                                                  |
+| Item                            | Details                                                                                                     |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| ~~**pgvector**~~                | ✅ FIXED — `vector` extension enabled, column is `vector(1536)`, IVFFlat cosine index created.              |
+| ~~**Redis / Celery**~~          | ✅ FIXED — Redis Cloud connected, Celery worker running with 16 tasks. Webhooks wired to Celery `.delay()`. |
+| ~~**No Alembic migrations**~~   | ✅ FIXED — 2 migrations applied, `alembic check` clean.                                                     |
+| **init_db() commented out**     | In `main.py`, the `await init_db()` call is commented out in the lifespan. DB tables are assumed to exist.  |
+| **No tests**                    | `tests/` directory contains only an empty `__init__.py`. Zero test coverage.                                |
+| **No CI/CD**                    | No GitHub Actions, no deployment pipeline.                                                                  |
+| **No monitoring**               | Sentry DSN not set. No Prometheus/Grafana. No uptime monitoring.                                            |
+| **Email not configured**        | No SendGrid key, no SMTP. Escalation/hot-lead email alerts won't send.                                      |
+| ~~**WhatsApp not configured**~~ | ✅ FIXED — Meta WhatsApp Cloud API tokens configured in `.env`. Code fully rewritten from Twilio.           |
+| ~~**OpenAI not configured**~~   | ✅ FIXED — `OPENAI_API_KEY` configured in `.env`. Embeddings functional.                                    |
+| **HubSpot not configured**      | CRM sync silently skips.                                                                                    |
+| **Cal.com not configured**      | Appointment booking silently skips.                                                                         |
+| ~~**Frontend not connected**~~  | ✅ FIXED — CORS configured for dev (`localhost:3000,5173`). `VITE_API_URL` set. Login tested end-to-end.    |
+| ~~**No SSL/TLS**~~              | ✅ FIXED — Backend deployed to Render with HTTPS.                                                           |
+| **No web-chat widget**          | The `/webhooks/live-chat` endpoint exists, but there's no embeddable JavaScript widget for client websites. |
+| **No real-time**                | No WebSocket or SSE. The frontend polls for data; live chat has no push delivery.                           |
+| **No file uploads**             | Document ingestion accepts text only. No PDF/DOCX parsing.                                                  |
 
 ---
 
@@ -335,17 +335,16 @@ CORS origins are logged at startup for easy verification.
 
 ### 🟡 Priority 2: Important (Go Live Is Risky Without)
 
-#### 2.10 Set Up Redis + Celery Worker
+#### 2.10 Set Up Redis + Celery Worker ✅
 
 ```
-
-What: Provision a Redis instance (Redis Cloud free tier, or Railway Redis).
-Set REDIS_URL, CELERY_BROKER_URL, CELERY_RESULT_BACKEND in .env.
-Run a Celery worker process alongside the API.
-Why: Without Celery, AI responses run in-process using FastAPI BackgroundTasks.
-This means: no retry on failure, no task persistence across restarts,
-and heavy AI calls block the event loop under load.
-
+DONE: Redis Cloud instance provisioned (me-south-1-1 region).
+      REDIS_URL, CELERY_BROKER_URL, CELERY_RESULT_BACKEND set in .env (all DB 0,
+      Redis Cloud free tier only supports 1 database).
+      Fixed worker.py: replaced 20x broken `get_async_session` with `get_db_context`.
+      Celery worker running with 16 tasks across 7 queues.
+      All webhook handlers now dispatch via Celery .delay() — production-grade
+      retries, persistence, and dead-letter handling. BackgroundTasks removed.
 ```
 
 #### 2.11 Enable Sentry Error Tracking
@@ -495,7 +494,7 @@ _Get one client live and handling real leads._
 
 _Make it production-grade._
 
-- [ ] Set up Redis + Celery worker
+- [x] Set up Redis + Celery worker
 - [ ] Enable Sentry monitoring
 - [ ] Write core test suite (70%+ coverage)
 - [ ] Set up GitHub Actions CI/CD
@@ -569,18 +568,18 @@ _Become a platform._
 
 ## Summary
 
-| Category                      | Status                                                                                                |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Category                      | Status                                                                                                    |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------- |
 | **Backend code completeness** | ~97% — all services, routes, integrations fully coded. Auth login bug fixed. Clients list endpoint added. |
-| **Frontend completeness**     | 100% — all 12 pages built, 0 TypeScript errors, login tested end-to-end.                               |
-| **Database**                  | ✅ 13 tables, 42 indexes, pgvector fixed, Alembic migrations operational (2 applied, head clean).      |
-| **AI pipeline**               | Fully coded. Anthropic + OpenAI keys configured. Smoke-tested via web-form webhook.                    |
-| **Integrations configured**   | 3 of 6 (Anthropic + OpenAI + Meta WhatsApp). SendGrid, HubSpot, Cal.com need keys/config.              |
-| **Deployment**                | ✅ Backend on Render (HTTPS). Frontend tested locally, ready for Vercel deploy.                        |
-| **Testing**                   | 0 automated tests. Manual: login ✅, webhook ✅, dashboard ✅, clients API ✅.                         |
-| **Monitoring**                | 0 monitoring (Sentry DSN not set)                                                                      |
-| **Client readiness**          | Client + admin user created. Login works. Dashboard loads. Needs Vercel deploy + email config.          |
-| **Time to first live lead**   | ~1–2 days — deploy frontend to Vercel, set Render env vars, configure Meta webhook URL.                |
+| **Frontend completeness**     | 100% — all 12 pages built, 0 TypeScript errors, login tested end-to-end.                                  |
+| **Database**                  | ✅ 13 tables, 42 indexes, pgvector fixed, Alembic migrations operational (2 applied, head clean).         |
+| **AI pipeline**               | Fully coded. Anthropic + OpenAI keys configured. Smoke-tested via web-form webhook.                       |
+| **Integrations configured**   | 4 of 6 (Anthropic + OpenAI + Meta WhatsApp + Redis). SendGrid, HubSpot, Cal.com need keys/config.         |
+| **Deployment**                | ✅ Backend on Render (HTTPS). Frontend tested locally, ready for Vercel deploy.                           |
+| **Testing**                   | 0 automated tests. Manual: login ✅, webhook ✅, dashboard ✅, clients API ✅.                            |
+| **Monitoring**                | 0 monitoring (Sentry DSN not set)                                                                         |
+| **Client readiness**          | Client + admin user created. Login works. Dashboard loads. Needs Vercel deploy + email config.            |
+| **Time to first live lead**   | ~1–2 days — deploy frontend to Vercel, set Render env vars, configure Meta webhook URL.                   |
 
 ---
 
@@ -593,7 +592,9 @@ _Become a platform._
 - **Added `GET /api/v1/clients` endpoint** — was missing; frontend `clientsApi.list()` was getting 404 after login
 - **Deployed backend to Render** — confirmed healthy at `https://ai-lead-api.onrender.com`
 - **Admin password reset** — created `scripts/reset_password.py`, password set to known value
-- **Full local test** — backend (port 8000) + frontend (port 3000) running, login → dashboard working end-to-end
+- **Set up Redis + Celery** — fixed `.env` Redis URL (removed `redis-cli -u` prefix), added `CELERY_BROKER_URL`/`CELERY_RESULT_BACKEND`, fixed all DB numbers to 0 (Redis Cloud free tier limit), fixed 20 broken `get_async_session` → `get_db_context` references in `worker.py`
+- **Wired webhooks to Celery** — replaced all `BackgroundTasks.add_task()` with Celery `.delay()` calls in `webhooks.py`; added 2 new tasks (`mark_whatsapp_as_read`, `process_missed_call_followup`); total: 16 Celery tasks
+- **Full local test** — backend (port 8000) + frontend (port 3000) + Celery worker running, login → dashboard working end-to-end
 
 ### February 19, 2026
 
